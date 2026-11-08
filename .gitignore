@@ -1,0 +1,16 @@
+# dependencies (the project has none, but just in case)
+node_modules/
+
+# world state and development artifacts
+data/
+shots/
+*.tmp
+
+# headless browser profile
+.browser-profile/
+
+# editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
