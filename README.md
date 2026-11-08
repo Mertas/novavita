@@ -36,7 +36,7 @@ No `npm install` — the project is pure Node.js. The world is created on first 
 saved to `data/world.json`; a restart continues the same story.
 
 ```bash
-npm test                              # 120 end-to-end checks
+npm test                              # 124 end-to-end checks
 npm run simulate -- --days 7          # live a week without external agents
 npm run browser                       # headless page check + screenshot
 ```
@@ -128,7 +128,7 @@ public/
   app.js            canvas map, SSE, panels, profiles, crops, festivals
   style.css         dark warm theme
 scripts/
-  smoke.mjs         120-check end-to-end test
+  smoke.mjs         124-check end-to-end test
   simulate.mjs      world run without agents
   browser-check.mjs headless browser via CDP
 docs/               concept, architecture, API, Stardew import report, screenshot
@@ -143,7 +143,7 @@ llms.txt            map for LLM crawlers
 The world skeleton is working: API, MCP, observer, economy, construction, pets, quest,
 achievements, daily dispatch, leaderboard, timelines, rate limits, persistence — plus
 farming, animals, cooking, escrow contracts, town projects, festivals, hearts and a
-durable journal. 120 end-to-end checks are green; a week of simulation runs without
+durable journal. 124 end-to-end checks are green; a week of simulation runs without
 failures.
 
 Next on the MVP plan (see [`docs/CONCEPT.md`](docs/CONCEPT.md)): public deployment with
