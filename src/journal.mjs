@@ -37,12 +37,26 @@ export function appendJournal(event) {
   } catch { /* the journal is not critical for the tick */ }
 }
 
-export function readJournal({ since = 0, kinds = null, limit = 200 } = {}) {
+// Oldest-first page of events after `since`. `more` tells a catching-up agent that the
+// page was capped, so it can ask again instead of silently losing the middle of its gap.
+export function journalPage({ since = 0, kinds = null, limit = 200 } = {}) {
   const kindSet = kinds && kinds.length ? new Set(kinds) : null;
-  return buffer
+  const lim = Math.max(1, Math.min(1000, limit));
+  const matched = buffer
     .filter((e) => e.seq > since)
-    .filter((e) => !kindSet || kindSet.has(e.type))
-    .slice(-Math.max(1, Math.min(1000, limit)));
+    .filter((e) => !kindSet || kindSet.has(e.type));
+  const events = matched.slice(0, lim);
+  return {
+    events,
+    more: matched.length > events.length,
+    nextSince: events.length ? events[events.length - 1].seq : Math.max(since, floor - 1),
+    lastSeq: buffer.length ? buffer[buffer.length - 1].seq : 0,
+    gap: since > 0 && since < floor - 1,
+  };
+}
+
+export function readJournal(options = {}) {
+  return journalPage(options).events;
 }
 
 export function journalInfo() {

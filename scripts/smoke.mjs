@@ -339,6 +339,16 @@ async function main() {
   check('journal is served', journal.status === 200 && journal.data.events.length > 0);
   check('journal has a floor', typeof journal.data.floor === 'number');
 
+  // A catching-up agent must receive the OLDEST unseen events first, plus a cursor and a
+  // `more` flag, so a gap can never be skipped silently.
+  const firstPage = await request(base, '/api/v1/journal?since=0&limit=5');
+  const seqs = firstPage.data.events.map((e) => e.seq);
+  check('journal pages oldest-first', seqs.length === 5 && seqs.every((s, i) => i === 0 || s > seqs[i - 1]));
+  check('journal exposes a catch-up cursor', firstPage.data.nextSince === seqs[seqs.length - 1] && firstPage.data.more === true);
+  const secondPage = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&limit=5`);
+  check('next page continues after cursor', secondPage.data.events[0].seq > firstPage.data.nextSince);
+  check('journal reports no gap at the head of the buffer', firstPage.data.gap === false);
+
   const contractsList = await request(base, '/api/v1/contracts');
   check('contracts endpoint', contractsList.status === 200 && Array.isArray(contractsList.data.contracts));
   const projectsList = await request(base, '/api/v1/projects');

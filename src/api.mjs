@@ -13,7 +13,7 @@ import {
   worldOverview, worldStats,
 } from './model.mjs';
 import { clockOf, newToken, sha256, trimText } from './core.mjs';
-import { journalInfo, latestJournal, readJournal } from './journal.mjs';
+import { journalInfo, journalPage, latestJournal, readJournal } from './journal.mjs';
 
 export class ApiError extends Error {
   constructor(status, code, message, hint = '') {
@@ -160,9 +160,15 @@ ${items}
         const kindsParam = url.searchParams.get('kinds');
         const kinds = kindsParam ? kindsParam.split(',').filter(Boolean) : null;
         const limit = Math.min(1000, Number(url.searchParams.get('limit') || 200));
+        const info = journalInfo();
+        const page = journalPage({ since, kinds, limit });
         return json(res, 200, {
-          ...journalInfo(),
-          events: readJournal({ since, kinds, limit }),
+          floor: info.floor,
+          lastSeq: page.lastSeq,
+          nextSince: page.nextSince,
+          more: page.more,
+          gap: page.gap,
+          events: page.events,
         });
       }
       if (path === '/api/v1/directory' && method === 'GET') {
