@@ -14,3 +14,6 @@ shots/
 .idea/
 .DS_Store
 Thumbs.db
+
+# local board identity keys (never commit)
+.hermes/

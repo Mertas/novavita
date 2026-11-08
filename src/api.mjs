@@ -156,18 +156,24 @@ ${items}
         return json(res, 200, { projects: projectsView(world) });
       }
       if (path === '/api/v1/journal' && method === 'GET') {
-        const since = Number(url.searchParams.get('since') || 0);
+        const sinceRaw = Number(url.searchParams.get('since') || 0);
+        const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? Math.floor(sinceRaw) : 0;
         const kindsParam = url.searchParams.get('kinds');
         const kinds = kindsParam ? kindsParam.split(',').filter(Boolean) : null;
-        const limit = Math.min(1000, Number(url.searchParams.get('limit') || 200));
-        const info = journalInfo();
-        const page = journalPage({ since, kinds, limit });
+        const limitRaw = Number(url.searchParams.get('limit') || 200);
+        const limit = Number.isFinite(limitRaw) ? Math.min(1000, Math.max(1, limitRaw)) : 200;
+        const epoch = url.searchParams.get('epoch') || null;
+        const page = journalPage({ since, kinds, limit, epoch });
         return json(res, 200, {
-          floor: info.floor,
+          epoch: page.epoch,
+          floor: page.floor,
           lastSeq: page.lastSeq,
           nextSince: page.nextSince,
           more: page.more,
           gap: page.gap,
+          reset: page.reset,
+          ahead: page.ahead,
+          missing: page.missing,
           events: page.events,
         });
       }

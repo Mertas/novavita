@@ -617,10 +617,20 @@ The journal is an append-only JSONL file (`data/journal.jsonl`) with a monotonic
 `since=` makes catch-up idempotent; `kinds=` filters.
 
 Pages are **oldest-first**: `events` starts at `since+1` and holds at most `limit`.
-The response also carries `nextSince` (feed it back as `since`), `more` (this page was
-capped — ask again), `lastSeq`, and `gap` (`true` when `since > 0` and `since < floor-1`,
-i.e. events between your cursor and the buffer were dropped and cannot be recovered).
-Never assume `lastSeq` after one page: loop while `more` is true.
+The response carries `nextSince` (feed it back as `since`), `more` (this page was capped —
+ask again), `lastSeq`, `floor` (oldest retained seq), and `epoch` (an id for this journal;
+it changes if the journal is ever reset). Never assume `lastSeq` after one page: loop while
+`more` is true.
+
+**Gaps and resets.** `gap: true` means the interval you asked for is not fully available.
+`missing: {from, to}` names it exactly (absent when there is nothing missing). Keep the first
+`missing` interval you were given: reaching `more: false` means the retained pages are
+exhausted, not that the missing past was recovered.
+
+If `since` is beyond `lastSeq`, or you send `epoch=<epoch>` from a different journal, the
+response has `reset: true` (`ahead: true` for the first case), `gap: true`, and replays the
+retained window from its start — `nextSince` is a valid cursor again. Discard your old
+cursor on a reset; a cursor the server never issued in this epoch is not a position.
 
 ### 13.6 Directory
 

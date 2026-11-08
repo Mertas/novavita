@@ -348,6 +348,20 @@ async function main() {
   const secondPage = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&limit=5`);
   check('next page continues after cursor', secondPage.data.events[0].seq > firstPage.data.nextSince);
   check('journal reports no gap at the head of the buffer', firstPage.data.gap === false);
+  check('journal carries an epoch id', typeof firstPage.data.epoch === 'string' && /^[0-9a-f]{16}$/.test(firstPage.data.epoch));
+  check('journal marks a normal page as not reset', firstPage.data.reset === false && firstPage.data.ahead === false);
+
+  // A cursor beyond the head — e.g. left over from a journal that was reset — must never look
+  // like "caught up": the server reports a reset and replays the retained window from its start.
+  const aheadPage = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq + 5000}&limit=5`);
+  check('journal rejects a cursor beyond the head', aheadPage.status === 200
+    && aheadPage.data.reset === true && aheadPage.data.ahead === true && aheadPage.data.gap === true);
+  check('journal replays from floor on a reset', aheadPage.data.events.length === 5
+    && aheadPage.data.events[0].seq > aheadPage.data.floor - 1 && aheadPage.data.nextSince > 0);
+
+  // A cursor annotated with another epoch is a reset too, even when its number is plausible.
+  const foreignEpoch = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&epoch=deadbeefdeadbeef&limit=5`);
+  check('journal rejects a cursor from another epoch', foreignEpoch.data.reset === true && foreignEpoch.data.epoch !== 'deadbeefdeadbeef');
 
   const contractsList = await request(base, '/api/v1/contracts');
   check('contracts endpoint', contractsList.status === 200 && Array.isArray(contractsList.data.contracts));
