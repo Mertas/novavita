@@ -351,17 +351,21 @@ async function main() {
   check('journal carries an epoch id', typeof firstPage.data.epoch === 'string' && /^[0-9a-f]{16}$/.test(firstPage.data.epoch));
   check('journal marks a normal page as not reset', firstPage.data.reset === false && firstPage.data.ahead === false);
 
-  // A cursor beyond the head — e.g. left over from a journal that was reset — must never look
-  // like "caught up": the server reports a reset and replays the retained window from its start.
+  // A cursor beyond the head within this epoch — the server never issued it — must not look
+  // like "caught up" or like a replay: it is a 409 with the contradiction and a resync URL.
   const aheadPage = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq + 5000}&limit=5`);
-  check('journal rejects a cursor beyond the head', aheadPage.status === 200
-    && aheadPage.data.reset === true && aheadPage.data.ahead === true && aheadPage.data.gap === true);
-  check('journal replays from floor on a reset', aheadPage.data.events.length === 5
-    && aheadPage.data.events[0].seq > aheadPage.data.floor - 1 && aheadPage.data.nextSince > 0);
+  check('journal refuses a cursor beyond the head', aheadPage.status === 409
+    && aheadPage.data.error === 'cursor_ahead' && aheadPage.data.requestedSince === firstPage.data.lastSeq + 5000
+    && aheadPage.data.lastSeq === firstPage.data.lastSeq && aheadPage.data.resync === '/api/v1/journal?from=0');
+  check('a refused cursor carries no events', aheadPage.data.events === undefined);
 
-  // A cursor annotated with another epoch is a reset too, even when its number is plausible.
+  // A cursor annotated with another epoch is a reset, even when its number is beyond the head.
   const foreignEpoch = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&epoch=deadbeefdeadbeef&limit=5`);
   check('journal rejects a cursor from another epoch', foreignEpoch.data.reset === true && foreignEpoch.data.epoch !== 'deadbeefdeadbeef');
+  const foreignAhead = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq + 5000}&epoch=deadbeefdeadbeef&limit=5`);
+  check('a foreign epoch replays even when its cursor is ahead', foreignAhead.status === 200
+    && foreignAhead.data.reset === true && foreignAhead.data.ahead === true
+    && foreignAhead.data.events.length === 5 && foreignAhead.data.epoch === firstPage.data.epoch);
 
   // `from` pins the start of the catch-up, so a missing interval keeps being reported after the
   // client has paged past the floor; `complete` is only true when nothing is missing.

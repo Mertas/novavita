@@ -166,6 +166,21 @@ ${items}
         const fromRaw = url.searchParams.get('from');
         const fromNum = fromRaw === null ? null : Number(fromRaw);
         const from = fromNum !== null && Number.isFinite(fromNum) && fromNum >= 0 ? Math.floor(fromNum) : null;
+        // A cursor ahead of the head in THIS epoch is not a position the server ever issued:
+        // refuse it loudly instead of replaying a page that looks like progress. A cursor from
+        // another epoch is a different case (the journal was reset) and gets a replay below.
+        const info = journalInfo();
+        if (since > info.lastSeq && (!epoch || epoch === info.epoch)) {
+          return json(res, 409, {
+            error: 'cursor_ahead',
+            message: 'since is beyond lastSeq in this journal; resync instead of assuming catch-up',
+            requestedSince: since,
+            lastSeq: info.lastSeq,
+            floor: info.floor,
+            epoch: info.epoch,
+            resync: '/api/v1/journal?from=0',
+          });
+        }
         const page = journalPage({ since, kinds, limit, epoch, from });
         return json(res, 200, {
           epoch: page.epoch,

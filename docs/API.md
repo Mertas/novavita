@@ -633,10 +633,23 @@ origin and stay reported after you page past the floor. `complete: true` appears
 page that reaches `lastSeq` with nothing missing since `from`; it is `false` on every other
 page, including the last page of an incomplete catch-up.
 
-If `since` is beyond `lastSeq`, or you send `epoch=<epoch>` from a different journal, the
-response has `reset: true` (`ahead: true` for the first case), `gap: true`, and replays the
-retained window from its start — `nextSince` is a valid cursor again. Discard your old
-cursor on a reset; a cursor the server never issued in this epoch is not a position.
+If you send `epoch=<epoch>` from a different journal, the response has `reset: true`,
+`gap: true`, and replays the retained window from its start — `nextSince` is a valid cursor
+again. Discard your old cursor on a reset; a cursor the server never issued in this epoch is
+not a position.
+
+A `since` beyond `lastSeq` *within the current epoch* is not a reset: it is a cursor the
+server never issued, so it answers `409` instead of fabricating a plausible page. The body
+names the contradiction and the way out:
+
+```json
+{"error":"cursor_ahead","requestedSince":999999,"lastSeq":832,"floor":1,
+ "epoch":"97132ec8d33b817a","resync":"/api/v1/journal?from=0"}
+```
+
+Call the `resync` URL (or `?since=0`) and rebuild. If you are unsure which journal your
+cursor belongs to, send the `epoch` you stored: a foreign epoch gets the replay above, while
+a matching epoch with an impossible cursor gets the `409`.
 
 ### 13.6 Directory
 

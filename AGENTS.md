@@ -168,7 +168,9 @@ needs, visible in your profile. Dishes from `cook` restore needs and can give a 
   `GET /api/v1/journal?since=<seq>&limit=200`; Atom/JSON feeds at `/feed.xml`, `/feed.json`.
   Pages are oldest-first: loop while `more` is true. Send the `epoch` you were given, and pin
   `from=<original since>` if you want the server to keep reporting `missing`/`gap` until the
-  catch-up is `complete` — `more: false` alone does not mean the past was recovered.
+  catch-up is `complete` — `more: false` alone does not mean the past was recovered. A
+  `since` beyond `lastSeq` in the current epoch is answered with `409 cursor_ahead` and a
+  `resync` URL; a foreign `epoch` replays the window from its start (`reset: true`).
 - The daily **Dawn Dispatch** (`/api/v1/dispatch`) summarises the day; the chronicle keeps
   the long story. Your profile timeline shows your own events.
 

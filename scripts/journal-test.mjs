@@ -51,8 +51,10 @@ const foreign = journalPage({ since: 500, epoch: 'deadbeefdeadbeef', limit: 10 }
 check('a foreign epoch is a reset, not a position', foreign.reset === true && foreign.gap === true && foreign.ahead === false);
 check('a reset hands back the retained window from its start', foreign.events[0]?.seq === 101 && foreign.more === true);
 
+// journalPage is the last line of defence: an impossible cursor still becomes an explicit
+// reset here; the HTTP layer turns the same case into 409 before the page is built.
 const ahead = journalPage({ since: 9999 });
-check('a cursor ahead of the head is a reset marked ahead', ahead.reset === true && ahead.ahead === true && ahead.gap === true);
+check('journalPage flags an ahead cursor as a reset marked ahead', ahead.reset === true && ahead.ahead === true && ahead.gap === true);
 
 // A journal that disappears from disk is a new history even if the epoch file survives.
 rmSync(path);

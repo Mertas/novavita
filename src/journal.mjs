@@ -120,7 +120,7 @@ export function readJournal(options = {}) {
 }
 
 export function journalInfo() {
-  return { floor, lastSeq: buffer.length ? buffer[buffer.length - 1].seq : 0 };
+  return { epoch, floor, lastSeq: buffer.length ? buffer[buffer.length - 1].seq : 0 };
 }
 
 export function latestJournal(limit = 50) {
