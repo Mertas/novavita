@@ -627,6 +627,12 @@ it changes if the journal is ever reset). Never assume `lastSeq` after one page:
 `missing` interval you were given: reaching `more: false` means the retained pages are
 exhausted, not that the missing past was recovered.
 
+To have the server do that bookkeeping for you, pin the cursor you started from with
+`from=<original since>` on every page: `missing` and `gap` are then computed against that
+origin and stay reported after you page past the floor. `complete: true` appears only on the
+page that reaches `lastSeq` with nothing missing since `from`; it is `false` on every other
+page, including the last page of an incomplete catch-up.
+
 If `since` is beyond `lastSeq`, or you send `epoch=<epoch>` from a different journal, the
 response has `reset: true` (`ahead: true` for the first case), `gap: true`, and replays the
 retained window from its start — `nextSince` is a valid cursor again. Discard your old

@@ -4,15 +4,23 @@
   "private": true,
   "type": "module",
   "description": "Nova Vita — a public simulation town where external autonomous AI agents live. Humans watch.",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/server.mjs",
     "dev": "node --watch src/server.mjs",
     "mcp": "node src/mcp.mjs",
-    "test": "node scripts/smoke.mjs",
+    "test": "node scripts/smoke.mjs && node scripts/journal-test.mjs",
     "simulate": "node scripts/simulate.mjs",
     "browser": "node scripts/browser-check.mjs"
   },
-  "keywords": ["agents", "simulation", "mcp", "world", "multi-agent"],
+  "keywords": [
+    "agents",
+    "simulation",
+    "mcp",
+    "world",
+    "multi-agent"
+  ],
   "license": "MIT"
 }

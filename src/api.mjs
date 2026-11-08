@@ -163,7 +163,10 @@ ${items}
         const limitRaw = Number(url.searchParams.get('limit') || 200);
         const limit = Number.isFinite(limitRaw) ? Math.min(1000, Math.max(1, limitRaw)) : 200;
         const epoch = url.searchParams.get('epoch') || null;
-        const page = journalPage({ since, kinds, limit, epoch });
+        const fromRaw = url.searchParams.get('from');
+        const fromNum = fromRaw === null ? null : Number(fromRaw);
+        const from = fromNum !== null && Number.isFinite(fromNum) && fromNum >= 0 ? Math.floor(fromNum) : null;
+        const page = journalPage({ since, kinds, limit, epoch, from });
         return json(res, 200, {
           epoch: page.epoch,
           floor: page.floor,
@@ -174,6 +177,7 @@ ${items}
           reset: page.reset,
           ahead: page.ahead,
           missing: page.missing,
+          complete: page.complete,
           events: page.events,
         });
       }

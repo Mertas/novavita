@@ -363,6 +363,14 @@ async function main() {
   const foreignEpoch = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&epoch=deadbeefdeadbeef&limit=5`);
   check('journal rejects a cursor from another epoch', foreignEpoch.data.reset === true && foreignEpoch.data.epoch !== 'deadbeefdeadbeef');
 
+  // `from` pins the start of the catch-up, so a missing interval keeps being reported after the
+  // client has paged past the floor; `complete` is only true when nothing is missing.
+  const pinned = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&from=0&limit=5`);
+  check('journal accepts a pinned catch-up origin', pinned.status === 200 && pinned.data.gap === false && pinned.data.missing === null);
+  const atHead = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq}&from=${firstPage.data.lastSeq}`);
+  check('journal marks a clean catch-up complete', atHead.status === 200 && atHead.data.more === false
+    && atHead.data.gap === false && atHead.data.complete === true);
+
   const contractsList = await request(base, '/api/v1/contracts');
   check('contracts endpoint', contractsList.status === 200 && Array.isArray(contractsList.data.contracts));
   const projectsList = await request(base, '/api/v1/projects');

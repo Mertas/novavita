@@ -33,12 +33,14 @@ export function initJournal(path, { reset = false } = {}) {
   buffer = [];
   floor = 1;
   mkdirSync(dirname(path), { recursive: true });
-  initEpoch(reset);
+  const existed = existsSync(path);
+  // A journal that is not on disk is a new history, whatever the old epoch file says.
+  initEpoch(reset || !existed);
   if (reset) {
     writeFileSync(path, '', 'utf8');
     return;
   }
-  if (!existsSync(path)) return;
+  if (!existed) return;
   try {
     const lines = readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).slice(-3000);
     buffer = lines.map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
@@ -60,30 +62,32 @@ export function appendJournal(event) {
 
 // Oldest-first page of events after `since`. `more` tells a catching-up agent that the
 // page was capped, so it can ask again instead of silently losing the middle of its gap.
-export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clientEpoch = null } = {}) {
+export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clientEpoch = null, from = null } = {}) {
   const kindSet = kinds && kinds.length ? new Set(kinds) : null;
   const lim = Math.max(1, Math.min(1000, limit));
   const head = buffer.length ? buffer[buffer.length - 1].seq : 0;
   const fromStart = Math.max(0, floor - 1);
   const base = { epoch, floor, lastSeq: head };
+  // `from` is the cursor the catch-up STARTED from, carried across pages. Reporting the missing
+  // interval relative to it keeps the gap visible after the client pages past the floor.
+  const origin = Number.isFinite(from) && from >= 0 ? from : since;
 
   // A cursor minted for another journal (or one ahead of the head) cannot be trusted as a
   // position: report it as a reset and hand back the retained window from its start.
   const stale = (clientEpoch && clientEpoch !== epoch) || since > head;
   if (stale) {
-    const events = buffer
-      .filter((e) => e.seq > fromStart)
-      .filter((e) => !kindSet || kindSet.has(e.type))
-      .slice(0, lim);
+    const available = buffer.filter((e) => e.seq > fromStart).filter((e) => !kindSet || kindSet.has(e.type));
+    const events = available.slice(0, lim);
     return {
       ...base,
       events,
-      more: events.length < buffer.filter((e) => e.seq > fromStart).length,
+      more: available.length > events.length,
       nextSince: events.length ? events[events.length - 1].seq : head,
       gap: true,
       reset: true,
       ahead: since > head,
       missing: null,
+      complete: false,
     };
   }
 
@@ -91,20 +95,23 @@ export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clien
     .filter((e) => e.seq > since)
     .filter((e) => !kindSet || kindSet.has(e.type));
   const events = matched.slice(0, lim);
-  const missingFrom = since + 1;
+  const missingFrom = origin + 1;
   const missingTo = floor - 1;
   const hasMissing = missingTo >= missingFrom;
+  const more = matched.length > events.length;
   return {
     ...base,
     events,
-    more: matched.length > events.length,
+    more,
     nextSince: events.length ? events[events.length - 1].seq : Math.max(since, head),
     gap: hasMissing,
     reset: false,
     ahead: false,
-    // The interval the server cannot supply. A client must keep the first one it is given in
-    // its reconstruction: reaching `more: false` does not mean the missing past was recovered.
+    // The interval the server cannot supply, computed from the start of this catch-up.
+    // Reaching `more: false` does not mean the missing past was recovered.
     missing: hasMissing ? { from: missingFrom, to: missingTo } : null,
+    // True only on the page that reaches the head with nothing unavailable since `from`.
+    complete: !hasMissing && !more,
   };
 }
 
