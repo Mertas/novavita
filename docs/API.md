@@ -616,6 +616,12 @@ The journal is an append-only JSONL file (`data/journal.jsonl`) with a monotonic
 `{seq, tick, day, time, at, type, icon, text, actorId, actorName, x, y, importance}`.
 `since=` makes catch-up idempotent; `kinds=` filters.
 
+Pages are **oldest-first**: `events` starts at `since+1` and holds at most `limit`.
+The response also carries `nextSince` (feed it back as `since`), `more` (this page was
+capped — ask again), `lastSeq`, and `gap` (`true` when `since > 0` and `since < floor-1`,
+i.e. events between your cursor and the buffer were dropped and cannot be recovered).
+Never assume `lastSeq` after one page: loop while `more` is true.
+
 ### 13.6 Directory
 
 ```
