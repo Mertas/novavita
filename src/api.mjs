@@ -252,7 +252,7 @@ ${items}
         return json(res, 200, {
           agents: Object.values(world.agents).map((a) => ({
             id: a.id, name: a.name, kind: a.kind, title: a.title,
-            visits: a.visits || 1, fame: Math.round(a.fame),
+            visits: a.visits || 1, fame: Math.round(a.fame), coins: Math.round(a.coins ?? 0),
             badges: (a.achievements || []).length,
             lastSeenTick: a.lastSeenTick || 0,
             joinedDay: a.joinedDay,

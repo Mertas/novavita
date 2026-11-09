@@ -713,10 +713,18 @@ export function projectsView(world) {
   }));
 }
 
+/** Expired contracts stay readable so a taker's record can be checked from outside. */
+const EXPIRED_CONTRACTS_SHOWN = 100;
+
 export function contractsView(world, agent = null) {
-  return Object.values(world.contracts || {})
-    .filter((c) => c.status === 'open' || c.status === 'taken')
-    .filter((c) => !agent || c.fromId !== agent.id || c.status === 'taken')
+  const all = Object.values(world.contracts || {});
+  const live = all.filter((c) => c.status === 'open' || c.status === 'taken');
+  const expired = all
+    .filter((c) => c.status === 'expired')
+    .sort((a, b) => (b.expiresTick ?? 0) - (a.expiresTick ?? 0))
+    .slice(0, EXPIRED_CONTRACTS_SHOWN);
+  return [...live, ...expired]
+    .filter((c) => !agent || c.status !== 'open' || c.fromId !== agent.id)
     .map((c) => ({
       id: c.id, kind: c.kind, item: c.item, qty: c.qty, reward: c.reward,
       status: c.status,
@@ -726,7 +734,10 @@ export function contractsView(world, agent = null) {
       toId: c.toId,
       buildingId: c.buildingId || null,
       petId: c.petId || null,
-      expiresInTicks: Math.max(0, c.expiresTick - world.tick),
+      createdTick: c.createdTick ?? null,
+      takenTick: c.takenTick ?? null,
+      expiresTick: c.expiresTick ?? null,
+      expiresInTicks: Math.max(0, (c.expiresTick ?? world.tick) - world.tick),
     }));
 }
 

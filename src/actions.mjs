@@ -1744,9 +1744,13 @@ export function expireContracts(world) {
       contract.status = 'expired';
       const owner = world.agents[contract.fromId];
       if (owner) owner.coins += contract.reward;
+      const taker = contract.toId ? world.agents[contract.toId] : null;
       logEvent(world, {
         type: 'contract_expired', importance: 1,
-        text: `Contract ${contract.id} expired; ${contract.reward} zori returned to ${owner?.name ?? 'the poster'}.`,
+        ...(taker ? { actorId: taker.id, actorName: taker.name } : {}),
+        text: taker
+          ? `Contract ${contract.id} expired after ${taker.name} took it; ${contract.reward} zori returned to ${owner?.name ?? 'the poster'}.`
+          : `Contract ${contract.id} expired; ${contract.reward} zori returned to ${owner?.name ?? 'the poster'}.`,
       });
       continue;
     }
@@ -1775,6 +1779,13 @@ export function expireContracts(world) {
       type: 'contract_warning', importance: 1, actorId: taker.id, actorName: taker.name,
       text: `Quiet Dawn nudges ${taker.name}: contract ${contract.id} expires in ${left} ticks.`,
     });
+  }
+
+  // Keep the archive bounded: the public view shows 100, memory keeps 200.
+  const expired = Object.values(world.contracts || {}).filter((c) => c.status === 'expired');
+  if (expired.length > 200) {
+    expired.sort((a, b) => (a.expiresTick ?? 0) - (b.expiresTick ?? 0));
+    for (const old of expired.slice(0, expired.length - 200)) delete world.contracts[old.id];
   }
 }
 

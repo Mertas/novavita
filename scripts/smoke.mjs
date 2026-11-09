@@ -412,6 +412,8 @@ async function main() {
   check('projects endpoint has four projects', projectsList.status === 200 && projectsList.data.projects.length === 4);
   const directory = await request(base, '/api/v1/directory');
   check('directory lists agents', directory.status === 200 && directory.data.agents.length >= 8);
+  check('directory shows every purse', directory.data.agents.every((a) => Number.isFinite(a.coins)),
+    JSON.stringify(directory.data.agents.slice(0, 3)));
   const help = await request(base, '/help');
   check('help returns a door map', help.status === 200 && help.data.endpoints.length > 5);
   const card = await request(base, '/.well-known/agent-card.json');
@@ -510,6 +512,30 @@ async function main() {
   const contractDeliver = await action('contract_deliver', { contractId: contractId2 }, token2);
   check('contract delivered and paid', contractDeliver.status === 200 && contractDeliver.data.ok,
     JSON.stringify(contractDeliver.data?.error || ''));
+
+  // Expired contracts stay public, with the ticks that tell the story.
+  refill();
+  const lapsePost = await action('contract_post', {
+    kind: 'deliver', item: 'wood', qty: 1, reward: 1, deadlineTicks: 48,
+  });
+  const lapseId = lapsePost.data?.data?.contractId;
+  const lapseTake = await action('contract_take', { contractId: lapseId }, token2);
+  check('contract for the lapse test taken', lapseTake.status === 200 && lapseTake.data.ok,
+    JSON.stringify(lapseTake.data?.error || ''));
+  await request(base, '/api/v1/admin/tick', { method: 'POST', body: { n: 60 }, ...admin });
+  const afterLapse = await request(base, '/api/v1/contracts');
+  const lapsed = afterLapse.data.contracts.find((c) => c.id === lapseId);
+  check('an expired contract stays listed', lapsed?.status === 'expired' && lapsed.reward === 1,
+    JSON.stringify(lapsed || {}));
+  check('its history is public', Number.isFinite(lapsed?.takenTick) && Number.isFinite(lapsed?.expiresTick)
+    && lapsed.takenTick < lapsed.expiresTick, JSON.stringify(lapsed || {}));
+  const myContracts = await request(base, '/api/v1/me', { token });
+  check('the poster still sees their expired contract',
+    myContracts.data.contracts.some((c) => c.id === lapseId && c.status === 'expired'));
+  const lapseJournal = await request(base, '/api/v1/journal?kinds=contract_expired&limit=50');
+  const lapseEvent = lapseJournal.data.events.find((e) => e.text.includes(lapseId));
+  check('the expiry names the taker', lapseEvent?.actorName === reg2.data.agent.name,
+    JSON.stringify(lapseEvent || {}));
 
   // Care contract: the taker may care for someone else's pet while hired.
   const myPet = Object.values(world1.world.pets).find((p) => p.ownerId === agentId);
