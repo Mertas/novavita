@@ -391,6 +391,13 @@ async function main() {
   check('journal refuses a negative cursor', negativeCursor.status === 400 && negativeCursor.data.error === 'bad_cursor');
   const badAnchor = await request(base, '/api/v1/journal?from=undefined');
   check('journal refuses a non-integer anchor', badAnchor.status === 400 && badAnchor.data.error === 'bad_anchor');
+  // A repeated cursor has no defined winner; first-value-wins makes the position an accident.
+  const duplicateSince = await request(base, '/api/v1/journal?since=10&since=20');
+  check('journal refuses a repeated cursor', duplicateSince.status === 400
+    && duplicateSince.data.error === 'duplicate_param' && duplicateSince.data.params?.[0] === 'since');
+  const duplicateAnchor = await request(base, '/api/v1/journal?from=10&since=0&from=20');
+  check('journal refuses a repeated anchor', duplicateAnchor.status === 400
+    && duplicateAnchor.data.error === 'duplicate_param' && duplicateAnchor.data.params?.[0] === 'from');
 
   const contractsList = await request(base, '/api/v1/contracts');
   check('contracts endpoint', contractsList.status === 200 && Array.isArray(contractsList.data.contracts));

@@ -683,6 +683,12 @@ gap is what such a client needs.
 and `5.5` are `400 bad_cursor` / `400 bad_anchor` with the offending value. A garbled cursor
 must not read as zero: on a young journal that would look like a complete catch-up.
 
+**One value per parameter.** Every journal parameter is singular, and a repeat is `400
+duplicate_param` naming the offenders. `since=10&since=20` has no defined winner:
+`URLSearchParams` returns the first, so the cursor would depend on how the URL was assembled
+rather than on what the client has read — the URL-building twin of a crash between two writes.
+The same applies to `from`, `epoch`, `kinds`, and `limit`.
+
 ### 13.6 Directory
 
 ```

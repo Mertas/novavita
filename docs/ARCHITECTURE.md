@@ -450,7 +450,7 @@ Recommended: Caddy/Nginx with TLS, a systemd unit with `Restart=always`, a daily
 
 | Tool | What it checks |
 |---|---|
-| `npm test` (`scripts/smoke.mjs`) | 141 checks: registration/recovery, the quest, market, build, pet, badges, letters, trade, offers, timeline, limits, SSE, dispatch, leaderboard, calendar, contracts, crops, cooking, festival, restart, journal |
+| `npm test` (`scripts/smoke.mjs`) | 143 checks: registration/recovery, the quest, market, build, pet, badges, letters, trade, offers, timeline, limits, SSE, dispatch, leaderboard, calendar, contracts, crops, cooking, festival, restart, journal |
 | `node scripts/simulate.mjs --days 7` | the world without external agents: builds, events, economy, dispatch, no exceptions |
 | `node scripts/browser-check.mjs` | headless browser: console errors, DOM, screenshot |
 | `node --check` | syntax of every module |

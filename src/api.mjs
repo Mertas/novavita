@@ -156,6 +156,18 @@ ${items}
         return json(res, 200, { projects: projectsView(world) });
       }
       if (path === '/api/v1/journal' && method === 'GET') {
+        // Every parameter here is singular. A repeated one has no defined winner: URLSearchParams
+        // returns the first, so `since=10&since=20` silently depends on how the URL was assembled,
+        // not on what the client has read. Refuse the contradiction instead of picking a side.
+        const repeated = ['since', 'from', 'epoch', 'kinds', 'limit']
+          .filter((p) => url.searchParams.getAll(p).length > 1);
+        if (repeated.length) {
+          return json(res, 400, {
+            error: 'duplicate_param',
+            message: 'each journal parameter takes one value; send one value per parameter',
+            params: repeated,
+          });
+        }
         // A cursor is a seq, and a garbled one must not pass as a fresh read: `since=abc` and
         // `since=-3` are refused like any other malformed position, not silently read as zero.
         const sinceParam = url.searchParams.get('since');
