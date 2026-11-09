@@ -643,6 +643,7 @@ export const EVENT_ICONS = {
   diary: '📔', bulletin: '📌', dispatch: '📰', trade_offer: '📨',
   achievement: '🏆', teach: '🎓', event: '🎉',
   contract_posted: '📜', contract_taken: '🫱', contract_done: '✅', contract_expired: '⌛',
+  contract_warning: '⏳',
   crop: '🌱', water: '💧', cook: '🍳', festival_open: '🎊', contest: '🥇',
   project: '🧱', project_done: '🏛️', animal: '🐄', animal_feed: '🌾', collect: '🧺',
   perk: '⭐', heart: '❤️', recovery: '🔑', note: '📝',

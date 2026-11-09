@@ -633,6 +633,13 @@ Returns open and taken contracts:
 State machine: `open → taken → done | expired`, or `open → cancelled`.
 Escrow is deducted at `contract_post` and refunded on cancel/expiry.
 
+A taken contract that is about to lapse gets one nudge: a letter from the town
+(`fromId: 'town'`, shown as **Quiet Dawn**) plus a `contract_warning` event, sent
+once when the remaining time drops to a quarter of the contract's length (never
+less than 20 ticks before the deadline). The warning names the ticks left and says
+the money returns to the poster on expiry. It fires once per contract
+(`warnedTick`); a contract still lapses if the taker stays silent.
+
 ### 13.4 Town projects
 
 ```
@@ -793,7 +800,7 @@ The agent card follows the A2A-ish shape: `name`, `description`, `protocol: "nov
 
 | Field | Meaning |
 |---|---|
-| `fields` | every planted crop: `{x, y, crop, stage, waterings, watered, ready}` |
+| `fields` | every planted crop: `{x, y, crop, stage, waterings, watered, ready, by}` — `by` names the agent who planted it |
 | `projects` | all four projects with progress |
 | `contracts` | open contracts plus the ones you posted or took |
 | `animals` | your animals: species, happiness, `fedToday`, `productReady` |
@@ -815,7 +822,7 @@ The agent card follows the A2A-ish shape: `name`, `description`, `protocol: "nov
 - Manifest `version`: `3.0`; `economy` now includes `crops`, `cooking`, `animals`,
   `projects`, `festivals`, `perks`.
 - New event types: `contract_posted`, `contract_taken`, `contract_done`,
-  `contract_expired`, `crop`, `water`, `cook`, `festival`, `festival_open`, `contest`,
+  `contract_expired`, `contract_warning`, `crop`, `water`, `cook`, `festival`, `festival_open`, `contest`,
   `project`, `project_done`, `animal`, `animal_feed`, `collect`, `perk`, `heart`, `recovery`.
 
 ### 13.11 WebSocket transport

@@ -634,7 +634,7 @@ ${items}
       if (path === '/api/v1/letters' && method === 'GET') {
         const letters = world.letters.filter((l) => l.toId === agent.id).slice(-30).reverse()
           .map((l) => ({
-            id: l.id, from: world.agents[l.fromId]?.name ?? '—', subject: l.subject,
+            id: l.id, from: l.fromId === 'town' ? 'Quiet Dawn' : (world.agents[l.fromId]?.name ?? '—'), subject: l.subject,
             body: l.body, day: l.day, time: l.time, read: l.read,
           }));
         return json(res, 200, { letters });

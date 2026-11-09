@@ -508,6 +508,8 @@ const HANDLERS = {
     agent.stats.cropsHarvested = (agent.stats.cropsHarvested || 0) + qty;
     agent.skills.farm = Math.min(10, agent.skills.farm + 0.2);
     agent.needs.joy = Math.min(100, agent.needs.joy + 2);
+    const planter = crop.by ? world.agents[crop.by] : null;
+    const byOther = Boolean(planter && planter.id !== agent.id);
     if (def.regrow > 0) {
       crop.stage = Math.max(0, def.waterings - def.regrow);
       crop.watered = false;
@@ -516,13 +518,14 @@ const HANDLERS = {
     }
     logEvent(world, {
       type: 'crop', importance: 1, actorId: agent.id, actorName: agent.name,
-      text: `${agent.name} harvests ${def.label}${quality.stars ? ` (${quality.label})` : ''} (+${qty}).`,
+      text: `${agent.name} harvests ${def.label}${quality.stars ? ` (${quality.label})` : ''} (+${qty})`
+        + `${byOther ? `, planted by ${planter.name}` : ''}.`,
       x: agent.pos.x, y: agent.pos.y,
     });
     return {
       message: `Harvested ${def.label} ×${qty}${quality.stars ? `, ${quality.label} quality` : ''}${bonusCoins ? ` (+${bonusCoins} zori bonus)` : ''}.`,
       hint: def.regrow > 0 ? `It regrows in ${def.regrow} waterings.` : 'Sell it, cook it, or give it as a gift.',
-      data: { crop: crop.crop, qty, quality: quality.label, bonusCoins },
+      data: { crop: crop.crop, qty, quality: quality.label, bonusCoins, plantedBy: planter?.name ?? null },
     };
   },
 
@@ -1729,16 +1732,48 @@ export function completeContract(world, contract, taker) {
   });
 }
 
-/** Expires stale contracts and refunds escrow. Called from the tick. */
+/** How close to expiry (in ticks) a silent taker gets nudged. */
+const CONTRACT_WARNING_MIN_TICKS = 20;
+
+/** Expires stale contracts and refunds escrow. Called from the tick.
+ *  A taken contract is a promise: the taker gets one letter before it lapses. */
 export function expireContracts(world) {
   for (const contract of Object.values(world.contracts || {})) {
-    if ((contract.status !== 'open' && contract.status !== 'taken') || world.tick <= contract.expiresTick) continue;
-    contract.status = 'expired';
-    const owner = world.agents[contract.fromId];
-    if (owner) owner.coins += contract.reward;
+    if (contract.status !== 'open' && contract.status !== 'taken') continue;
+    if (world.tick > contract.expiresTick) {
+      contract.status = 'expired';
+      const owner = world.agents[contract.fromId];
+      if (owner) owner.coins += contract.reward;
+      logEvent(world, {
+        type: 'contract_expired', importance: 1,
+        text: `Contract ${contract.id} expired; ${contract.reward} zori returned to ${owner?.name ?? 'the poster'}.`,
+      });
+      continue;
+    }
+    if (contract.status !== 'taken' || contract.warnedTick) continue;
+    const span = Math.max(1, contract.expiresTick - (contract.createdTick ?? world.tick));
+    const warnAt = Math.max(CONTRACT_WARNING_MIN_TICKS, Math.round(span * 0.25));
+    const left = contract.expiresTick - world.tick;
+    if (left > warnAt) continue;
+    contract.warnedTick = world.tick;
+    const taker = world.agents[contract.toId];
+    if (!taker) continue;
+    const poster = world.agents[contract.fromId];
+    const clock = clockOf(world.tick);
+    const itemLabel = contract.kind === 'care' ? 'care' : (ITEMS[contract.item]?.label ?? contract.item);
+    world.letters.push({
+      id: `letter-${contract.id}`,
+      fromId: 'town', toId: taker.id,
+      subject: `Contract ${contract.id}: ${left} ticks left`,
+      body: `${poster?.name ?? 'The poster'} is still waiting for ${contract.qty}× ${itemLabel}. `
+        + `${contract.reward} zori sit in escrow until tick ${contract.expiresTick}. `
+        + 'Deliver with contract_deliver, or write back if you cannot finish: when a contract expires the money returns to the poster.',
+      tick: world.tick, day: clock.day, time: clock.hhmm, read: false,
+    });
+    if (world.letters.length > 400) world.letters.shift();
     logEvent(world, {
-      type: 'contract_expired', importance: 1,
-      text: `Contract ${contract.id} expired; ${contract.reward} zori returned to ${owner?.name ?? 'the poster'}.`,
+      type: 'contract_warning', importance: 1, actorId: taker.id, actorName: taker.name,
+      text: `Quiet Dawn nudges ${taker.name}: contract ${contract.id} expires in ${left} ticks.`,
     });
   }
 }

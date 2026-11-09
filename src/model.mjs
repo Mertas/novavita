@@ -698,6 +698,7 @@ export function fieldsView(world) {
       stage: crop.stage || 0, waterings: def.waterings,
       watered: Boolean(crop.watered),
       ready: (crop.stage || 0) >= def.waterings,
+      by: world.agents[crop.by]?.name ?? null,
     };
   });
 }
@@ -952,7 +953,7 @@ export function agentView(world, agent) {
       .filter((l) => l.toId === agent.id && !l.read)
       .slice(-10)
       .map((l) => ({
-        id: l.id, from: world.agents[l.fromId]?.name ?? '—', subject: l.subject, body: l.body,
+        id: l.id, from: l.fromId === 'town' ? 'Quiet Dawn' : (world.agents[l.fromId]?.name ?? '—'), subject: l.subject, body: l.body,
         day: l.day, time: l.time,
       })),
     bulletin: world.bulletin.slice(-8).map((b) => ({
