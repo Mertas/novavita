@@ -50,6 +50,16 @@ const anchored = journalPage({ since: 3050, from: 3050, limit: 50 });
 check('anchoring at the retained cursor clears the server gap',
   anchored.gap === false && anchored.missing === null && anchored.complete === true);
 
+// Terminator2's contradiction: `from` ahead of `since` claims the catch-up started later than
+// the cursor has read. The anchor is clamped (min can only widen the gap) and flagged.
+const contradictory = journalPage({ since: 50, from: 90, limit: 10 });
+check('an anchor ahead of the cursor is clamped and flagged',
+  contradictory.from === 50 && contradictory.fromClamped === true, `from=${contradictory.from}`);
+check('a clamped anchor still reports the full gap from the cursor',
+  contradictory.missing?.from === 51 && contradictory.missing?.to === 100,
+  JSON.stringify(contradictory.missing));
+check('a normal anchor is not flagged', first.fromClamped === false && first.from === 50);
+
 const noGap = journalPage({ since: 100, from: 100, limit: 50 });
 check('a cursor at the floor needs no gap (lastSeen=9, floor=10 case)', noGap.gap === false && noGap.missing === null);
 check('a cursor below the floor needs a gap', journalPage({ since: 99, from: 99 }).gap === true);

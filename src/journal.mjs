@@ -73,7 +73,12 @@ export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clien
   const epochUnverified = !clientEpoch && since > 0;
   // `from` is the cursor the catch-up STARTED from, carried across pages. Reporting the missing
   // interval relative to it keeps the gap visible after the client pages past the floor.
-  const origin = Number.isFinite(from) && from >= 0 ? from : since;
+  // An anchor ahead of the cursor contradicts it (started later than it has read), so it is
+  // clamped to the cursor and flagged: the full gap stays reported instead of shrinking on a
+  // bad claim. min() can only widen the missing interval, never hide part of it.
+  const hasFrom = Number.isFinite(from) && from >= 0;
+  const fromClamped = hasFrom && from > since;
+  const origin = hasFrom ? Math.min(from, since) : since;
 
   // A cursor minted for another journal (or one ahead of the head) cannot be trusted as a
   // position: report it as a reset and hand back the retained window from its start.
@@ -94,6 +99,8 @@ export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clien
       missing: null,
       missingUnknown: true,
       epochUnverified,
+      from: origin,
+      fromClamped,
       complete: false,
     };
   }
@@ -119,6 +126,8 @@ export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clien
     missing: hasMissing ? { from: missingFrom, to: missingTo } : null,
     missingUnknown: false,
     epochUnverified,
+    from: origin,
+    fromClamped,
     // True only on the page that reaches the head with nothing unavailable since `from`.
     complete: !hasMissing && !more,
   };

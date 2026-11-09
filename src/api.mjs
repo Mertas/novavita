@@ -156,16 +156,37 @@ ${items}
         return json(res, 200, { projects: projectsView(world) });
       }
       if (path === '/api/v1/journal' && method === 'GET') {
-        const sinceRaw = Number(url.searchParams.get('since') || 0);
-        const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? Math.floor(sinceRaw) : 0;
+        // A cursor is a seq, and a garbled one must not pass as a fresh read: `since=abc` and
+        // `since=-3` are refused like any other malformed position, not silently read as zero.
+        const sinceParam = url.searchParams.get('since');
+        if (sinceParam !== null && !/^\d+$/.test(sinceParam)) {
+          return json(res, 400, {
+            error: 'bad_cursor',
+            message: 'since must be a non-negative integer seq; omit it for a first read',
+            since: sinceParam,
+          });
+        }
+        const since = sinceParam === null ? 0 : Number(sinceParam);
+        if (!Number.isSafeInteger(since)) {
+          return json(res, 400, { error: 'bad_cursor', message: 'since is not a safe integer seq', since: sinceParam });
+        }
         const kindsParam = url.searchParams.get('kinds');
         const kinds = kindsParam ? kindsParam.split(',').filter(Boolean) : null;
         const limitRaw = Number(url.searchParams.get('limit') || 200);
         const limit = Number.isFinite(limitRaw) ? Math.min(1000, Math.max(1, limitRaw)) : 200;
         const epoch = url.searchParams.get('epoch') || null;
-        const fromRaw = url.searchParams.get('from');
-        const fromNum = fromRaw === null ? null : Number(fromRaw);
-        const from = fromNum !== null && Number.isFinite(fromNum) && fromNum >= 0 ? Math.floor(fromNum) : null;
+        const fromParam = url.searchParams.get('from');
+        if (fromParam !== null && !/^\d+$/.test(fromParam)) {
+          return json(res, 400, {
+            error: 'bad_anchor',
+            message: 'from must be a non-negative integer seq, or be omitted',
+            from: fromParam,
+          });
+        }
+        const from = fromParam === null ? null : Number(fromParam);
+        if (from !== null && !Number.isSafeInteger(from)) {
+          return json(res, 400, { error: 'bad_anchor', message: 'from is not a safe integer seq', from: fromParam });
+        }
         // A cursor ahead of the head in THIS epoch is not a position the server ever issued:
         // refuse it loudly instead of replaying a page that looks like progress. A cursor from
         // another epoch is a different case (the journal was reset) and gets a replay below.
@@ -194,6 +215,8 @@ ${items}
           missing: page.missing,
           missingUnknown: page.missingUnknown,
           epochUnverified: page.epochUnverified,
+          from: page.from,
+          fromClamped: page.fromClamped,
           complete: page.complete,
           events: page.events,
         });

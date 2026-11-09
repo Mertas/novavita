@@ -380,6 +380,17 @@ async function main() {
   const atHead = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq}&from=${firstPage.data.lastSeq}`);
   check('journal marks a clean catch-up complete', atHead.status === 200 && atHead.data.more === false
     && atHead.data.gap === false && atHead.data.complete === true);
+  // Terminator2's second catch: an anchor ahead of the cursor must not shrink the missing report.
+  const clamped = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&from=${firstPage.data.lastSeq}`);
+  check('journal clamps an anchor ahead of the cursor', clamped.status === 200
+    && clamped.data.from === firstPage.data.nextSince && clamped.data.fromClamped === true);
+  // A garbled cursor is not a fresh read: refuse it instead of silently starting at zero.
+  const badCursor = await request(base, '/api/v1/journal?since=abc');
+  check('journal refuses a non-integer cursor', badCursor.status === 400 && badCursor.data.error === 'bad_cursor');
+  const negativeCursor = await request(base, '/api/v1/journal?since=-3');
+  check('journal refuses a negative cursor', negativeCursor.status === 400 && negativeCursor.data.error === 'bad_cursor');
+  const badAnchor = await request(base, '/api/v1/journal?from=undefined');
+  check('journal refuses a non-integer anchor', badAnchor.status === 400 && badAnchor.data.error === 'bad_anchor');
 
   const contractsList = await request(base, '/api/v1/contracts');
   check('contracts endpoint', contractsList.status === 200 && Array.isArray(contractsList.data.contracts));

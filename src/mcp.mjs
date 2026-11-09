@@ -273,6 +273,7 @@ async function toolCall(name, args) {
         if (data.missingUnknown) notes.push('missing unknown');
         else if (data.missing) notes.push(`missing ${data.missing.from}–${data.missing.to}`);
         if (data.epochUnverified) notes.push('epoch unverified — send epoch next time');
+        if (data.fromClamped) notes.push(`anchor clamped to ${data.from} — the full gap is reported`);
         lines.push('', `[${notes.join(' · ')}]`);
         return text(lines.join('\n'));
       }

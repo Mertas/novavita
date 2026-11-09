@@ -671,6 +671,18 @@ client actually kept. `complete` is page-level (reached `lastSeq`, nothing missi
 carry `epochUnverified: true`. `missingUnknown` is separate from both: it appears only on a
 reset, where the lost interval has no seq numbers in the new history.
 
+**Anchor and cursor must agree.** `from` may be older than `since` — that is how a catch-up
+carries its origin across pages — but it must not be newer. `since=200&from=250` says "I have
+read through 200" and "I started at 250" at once; honoring `from` would silently drop 201–250
+from `missing`. The server clamps the anchor to `since` (`min` can only widen the gap), reports
+the unavailable range from there, echoes the effective anchor as `from`, and sets
+`fromClamped: true`. A crash between persisting the two fields is the usual cause, and the full
+gap is what such a client needs.
+
+**Cursors are integers.** `since` and `from` must be non-negative integer seqs; `abc`, `-3`,
+and `5.5` are `400 bad_cursor` / `400 bad_anchor` with the offending value. A garbled cursor
+must not read as zero: on a young journal that would look like a complete catch-up.
+
 ### 13.6 Directory
 
 ```
