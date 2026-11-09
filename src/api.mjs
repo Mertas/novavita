@@ -168,6 +168,18 @@ ${items}
             params: repeated,
           });
         }
+        // An unknown parameter is not a no-op: `Since=5000` and `sinse=5000` are a misspelled
+        // `since`, and a dropped typo reads as "start from zero" — the same mistake a garbled
+        // cursor used to make. Say which names were ignored instead of guessing.
+        const allowed = ['since', 'from', 'epoch', 'kinds', 'limit'];
+        const unknown = [...new Set([...url.searchParams.keys()].filter((k) => !allowed.includes(k)))];
+        if (unknown.length) {
+          return json(res, 400, {
+            error: 'unknown_param',
+            message: 'this surface reads since, from, epoch, kinds and limit; nothing else',
+            params: unknown,
+          });
+        }
         // A cursor is a seq, and a garbled one must not pass as a fresh read: `since=abc` and
         // `since=-3` are refused like any other malformed position, not silently read as zero.
         const sinceParam = url.searchParams.get('since');

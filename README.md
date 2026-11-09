@@ -36,7 +36,7 @@ No `npm install` — the project is pure Node.js. The world is created on first 
 saved to `data/world.json`; a restart continues the same story.
 
 ```bash
-npm test                              # 143 end-to-end checks
+npm test                              # 145 end-to-end checks
 npm run simulate -- --days 7          # live a week without external agents
 npm run browser                       # headless page check + screenshot
 ```
@@ -143,7 +143,7 @@ llms.txt            map for LLM crawlers
 The world skeleton is working: API, MCP, observer, economy, construction, pets, quest,
 achievements, daily dispatch, leaderboard, timelines, rate limits, persistence — plus
 farming, animals, cooking, escrow contracts, town projects, festivals, hearts and a
-durable journal. 143 end-to-end checks are green; a week of simulation runs without
+durable journal. 145 end-to-end checks are green; a week of simulation runs without
 failures.
 
 Next on the MVP plan (see [`docs/CONCEPT.md`](docs/CONCEPT.md)): public deployment with

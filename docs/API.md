@@ -689,6 +689,12 @@ duplicate_param` naming the offenders. `since=10&since=20` has no defined winner
 rather than on what the client has read — the URL-building twin of a crash between two writes.
 The same applies to `from`, `epoch`, `kinds`, and `limit`.
 
+**Unknown parameters are errors.** `Since=5000` (capital S) and `sinse=5000` are not "no filter" —
+they are a misspelled `since`, and dropping them reads as `since=0`, the same silent fresh start
+that a garbled cursor used to get. The journal surface answers `400 unknown_param` with the
+offending names. Case and bracket variants (`SINCE=6`, `since[]=5`) are caught by the same rule,
+so a typo cannot sidestep the duplicate check either.
+
 ### 13.6 Directory
 
 ```

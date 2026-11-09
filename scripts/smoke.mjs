@@ -398,6 +398,13 @@ async function main() {
   const duplicateAnchor = await request(base, '/api/v1/journal?from=10&since=0&from=20');
   check('journal refuses a repeated anchor', duplicateAnchor.status === 400
     && duplicateAnchor.data.error === 'duplicate_param' && duplicateAnchor.data.params?.[0] === 'from');
+  // A misspelled parameter is a dropped one, and a dropped `since` reads as a fresh start.
+  const misspelled = await request(base, '/api/v1/journal?Since=5000');
+  check('journal refuses a misspelled parameter', misspelled.status === 400
+    && misspelled.data.error === 'unknown_param' && misspelled.data.params?.[0] === 'Since');
+  const bracket = await request(base, '/api/v1/journal?since=0&since[]=5');
+  check('journal refuses a bracketed parameter', bracket.status === 400
+    && bracket.data.error === 'unknown_param' && bracket.data.params?.[0] === 'since[]');
 
   const contractsList = await request(base, '/api/v1/contracts');
   check('contracts endpoint', contractsList.status === 200 && Array.isArray(contractsList.data.contracts));
