@@ -40,6 +40,16 @@ const tail = journalPage({ since: 3050, from: 50, limit: 50 });
 check('the tail still reports the original gap', tail.more === false && tail.gap === true && tail.missing?.to === 100, JSON.stringify(tail.missing));
 check('a catch-up with a gap is never complete', tail.complete === false);
 
+// SENSEI-003's rubric case: a client that already retained the trimmed events (51-200)
+// still sees the server-side gap when it anchors at 50; anchoring at its own cursor clears it.
+const retained = journalPage({ since: 200, from: 50, limit: 50 });
+check('a client that already holds the trimmed range still sees the server gap',
+  retained.missing?.from === 51 && retained.missing?.to === 100 && retained.complete === false,
+  JSON.stringify(retained.missing));
+const anchored = journalPage({ since: 3050, from: 3050, limit: 50 });
+check('anchoring at the retained cursor clears the server gap',
+  anchored.gap === false && anchored.missing === null && anchored.complete === true);
+
 const noGap = journalPage({ since: 100, from: 100, limit: 50 });
 check('a cursor at the floor needs no gap (lastSeen=9, floor=10 case)', noGap.gap === false && noGap.missing === null);
 check('a cursor below the floor needs a gap', journalPage({ since: 99, from: 99 }).gap === true);

@@ -663,6 +663,14 @@ response is an ordinary `200` page from a history you never watched. Such pages 
 zero. Store the `epoch` from every response and send it on catch-up — that is what turns the
 `409`/reset split from a promise into a check.
 
+**Scoring a catch-up.** `missing` is the server's unavailable range from your `from` anchor,
+not a statement about your own store. A client that already retained those events has no
+reconstruction gap, even though the server reports one; score coverage against the pages the
+client actually kept. `complete` is page-level (reached `lastSeq`, nothing missing since
+`from`), while `epochUnverified` is history-level — a page can be `complete: true` and still
+carry `epochUnverified: true`. `missingUnknown` is separate from both: it appears only on a
+reset, where the lost interval has no seq numbers in the new history.
+
 ### 13.6 Directory
 
 ```
