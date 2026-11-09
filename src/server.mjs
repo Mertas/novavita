@@ -117,7 +117,9 @@ export async function startWorld(opts = {}) {
   const wsClients = new Set();
   let wsHub = null;
   const broadcast = (event) => {
-    const payload = `event: world\ndata: ${JSON.stringify(event)}\n\n`;
+    // World events go out as `world`, parlour chat as `parlour` — one SSE stream, two feeds.
+    const channel = event && event.channel ? event.channel : 'world';
+    const payload = `event: ${channel}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const res of clients) {
       try { res.write(payload); } catch { clients.delete(res); }
     }

@@ -50,6 +50,21 @@ const state = {
   dispatch: null,
   contracts: null,
   projects: null,
+  parlour: {
+    messages: [],
+    lastSeq: 0,
+    me: null,
+    watchers: null,
+    limits: { maxText: 400, humanGapMs: 5000 },
+    unread: 0,
+    replyTo: null,
+    error: '',
+    loading: false,
+    sending: false,
+    draft: '',
+    editingName: false,
+    sound: localStorage.getItem('nv_parlour_sound') !== 'off',
+  },
   loading: { leaderboard: false, offers: false, dispatch: false },
 };
 
@@ -1079,6 +1094,7 @@ function renderAbout() {
 
 function renderTab() {
   if (state.tab === 'feed') renderFeed();
+  else if (state.tab === 'parlour') renderParlour();
   else if (state.tab === 'people') renderPeople();
   else if (state.tab === 'market') renderMarket();
   else if (state.tab === 'town') renderTown();
@@ -1089,10 +1105,11 @@ function renderTab() {
 function switchTab(tab) {
   state.tab = tab;
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === tab));
-  for (const id of ['feed', 'people', 'market', 'town', 'dispatch', 'about']) {
+  for (const id of ['feed', 'parlour', 'people', 'market', 'town', 'dispatch', 'about']) {
     $panel(id).hidden = id !== tab;
   }
   renderTab();
+  if (tab === 'parlour') { state.parlour.unread = 0; updateParlourDot(); loadParlour(); }
   if (tab === 'people') loadLeaderboard();
   if (tab === 'market') loadOffers();
   if (tab === 'town') loadTown();
@@ -1272,12 +1289,358 @@ function connectSSE() {
       setStat('statPets', 'statPetsLabel', data.stats.pets, 'pet', 'pets');
     } catch { /* ignore */ }
   });
+  es.addEventListener('parlour', (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      if (data && data.message) receiveParlourMessage(data.message);
+    } catch { /* ignore */ }
+  });
   es.onerror = () => { /* EventSource reconnects on its own */ };
+}
+
+// ---------------------------------------------------------------------------
+// Parlour — public channel between external agents and the people watching
+// ---------------------------------------------------------------------------
+
+const PARLOUR_POLL_MS = 30000;
+let parlourAudio = null;
+let parlourAudioUnlocked = false;
+
+function parlourPost(url, body) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body || {}),
+  }).then(async (res) => {
+    let data = null;
+    try { data = await res.json(); } catch { /* empty body */ }
+    if (!res.ok) {
+      const err = new Error(data?.error?.message || `HTTP ${res.status}`);
+      err.status = res.status;
+      err.code = data?.error?.code || '';
+      throw err;
+    }
+    return data;
+  });
+}
+
+function parlourSoundLabel() {
+  return state.parlour.sound ? '🔔 sound on' : '🔕 sound off';
+}
+
+function updateParlourDot() {
+  const dot = document.getElementById('parlourDot');
+  if (!dot) return;
+  const show = state.parlour.unread > 0 && state.tab !== 'parlour';
+  dot.hidden = !show;
+  const tab = dot.closest('.tab');
+  if (tab) tab.title = show ? `${state.parlour.unread} new message${state.parlour.unread === 1 ? '' : 's'} in the Parlour` : '';
+}
+
+function unlockParlourAudio() {
+  if (parlourAudioUnlocked) return;
+  try {
+    parlourAudio = parlourAudio || new (window.AudioContext || window.webkitAudioContext)();
+    if (parlourAudio.state === 'suspended') parlourAudio.resume();
+    parlourAudioUnlocked = true;
+  } catch { /* no audio available */ }
+}
+
+function parlourBell() {
+  try {
+    unlockParlourAudio();
+    if (!parlourAudio) return;
+    const t = parlourAudio.currentTime;
+    [[880, 0], [1320, 0.18]].forEach(([freq, offset]) => {
+      const osc = parlourAudio.createOscillator();
+      const gain = parlourAudio.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t + offset);
+      gain.gain.exponentialRampToValueAtTime(0.09, t + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + offset + 0.5);
+      osc.connect(gain).connect(parlourAudio.destination);
+      osc.start(t + offset);
+      osc.stop(t + offset + 0.55);
+    });
+  } catch { /* sound is a nicety, never an error */ }
+}
+
+function mentionsMe(text) {
+  const name = state.parlour.me?.name;
+  if (!name) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try {
+    return new RegExp(`(^|[^\\p{L}\\p{N}_])@?${escaped}([^\\p{L}\\p{N}_]|$)`, 'iu').test(text);
+  } catch {
+    return text.toLowerCase().includes(name.toLowerCase());
+  }
+}
+
+function parlourWatcherText(w) {
+  if (!w || !w.total) return 'No one is watching the world right now';
+  const names = (w.names || []).filter(Boolean);
+  if (w.total === 1 && !names.length) return '1 person is watching';
+  const label = w.total === 1 ? '1 watcher' : `${w.total} watchers`;
+  return names.length ? `${label}: ${names.join(', ')}` : label;
+}
+
+function parlourMessageBySeq(seq) {
+  return state.parlour.messages.find((m) => m.seq === seq) || null;
+}
+
+function parlourMessageHTML(m) {
+  const p = state.parlour;
+  const mine = p.me && m.authorId === p.me.id;
+  const quote = m.replyTo ? parlourMessageBySeq(Number(String(m.replyTo).replace(/^p/, ''))) : null;
+  const quoteHTML = m.replyTo
+    ? `<div class="parlour-reply">↪ ${quote ? `${esc(quote.name)}: ${esc(quote.text)}` : 'earlier message'}</div>`
+    : '';
+  const kind = m.kind === 'agent' ? 'agent' : 'human';
+  return `
+    <div class="parlour-msg${mine ? ' is-mine' : ''}" data-seq="${m.seq}">
+      <div class="parlour-avatar" style="background:${esc(m.color || '#e9b06a')}">${esc(initial(m.name))}</div>
+      <div class="parlour-body">
+        ${quoteHTML}
+        <div class="parlour-head">
+          <span class="parlour-name">${esc(m.name)}</span>
+          <span class="parlour-kind ${kind}">${kind}</span>
+          <span class="parlour-time">day ${esc(m.day)} · ${esc(m.time)}</span>
+        </div>
+        <div class="parlour-text">${esc(m.text)}</div>
+        <div class="parlour-actions">
+          <button class="parlour-reply-btn" data-reply="${m.seq}" type="button">Reply</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderParlour() {
+  const panel = $panel('parlour');
+  const p = state.parlour;
+  const named = Boolean(p.me && p.me.name) && !p.editingName;
+  const max = p.limits?.maxText || 400;
+  const reply = p.replyTo ? parlourMessageBySeq(p.replyTo) : null;
+
+  const log = p.messages.length
+    ? p.messages.map(parlourMessageHTML).join('')
+    : `<div class="parlour-empty"><b>${named ? 'The Parlour is quiet.' : 'The Parlour is open.'}</b>
+       ${named ? 'Say something — agents read this channel when they act in the world.' : 'Agents and the people watching the world share this channel. Pick a name to join in.'}</div>`;
+
+  const gate = `
+    <div class="parlour-gate">
+      <h3>${p.editingName ? 'Change your name' : 'Take a seat'}</h3>
+      <p>Your name is how agents and other watchers will see you. No account, no password — just a name that is not already taken.</p>
+      <form id="parlourNameForm" autocomplete="off">
+        <input class="parlour-name-input" maxlength="24" placeholder="Your name" value="${esc(p.me?.name || '')}" autocomplete="nickname" aria-label="Your name in the Parlour">
+        <button class="parlour-btn" type="submit">${p.editingName ? 'Save' : 'Enter'}</button>
+      </form>
+      ${p.editingName ? '<div class="parlour-error"><button class="parlour-sound" id="parlourCancelName" type="button">Cancel</button></div>' : ''}
+      <div class="parlour-error">${esc(p.error)}</div>
+    </div>`;
+
+  const composer = `
+    <div class="parlour-form">
+      ${reply ? `<div class="parlour-quote"><span>Replying to ${esc(reply.name)}: ${esc(reply.text)}</span><button type="button" id="parlourQuoteClear" aria-label="Cancel reply">✕</button></div>` : ''}
+      <form id="parlourForm" class="parlour-compose" autocomplete="off">
+        <textarea class="parlour-input" rows="2" maxlength="${max}" placeholder="Speak to the agents…" aria-label="Message to the Parlour">${esc(p.draft)}</textarea>
+        <button class="parlour-btn" type="submit" ${p.sending ? 'disabled' : ''}>${p.sending ? '…' : 'Send'}</button>
+      </form>
+      <div class="parlour-hint">
+        <span class="me">You: ${esc(p.me?.name || '')}</span>
+        <span>Enter to send · Shift+Enter for a new line</span>
+        <button class="edit" id="parlourEditName" type="button">Edit name</button>
+      </div>
+      <div class="parlour-error">${esc(p.error)}</div>
+    </div>`;
+
+  const wasAtBottom = (() => {
+    const old = panel.querySelector('.parlour-log');
+    return old ? old.scrollHeight - old.scrollTop - old.clientHeight < 40 : true;
+  })();
+
+  panel.innerHTML = `
+    <div class="parlour">
+      <div class="parlour-top">
+        <span class="eye">👁</span>
+        <span class="who">${esc(parlourWatcherText(p.watchers))}</span>
+        <span class="spacer"></span>
+        <button class="parlour-sound${p.sound ? ' is-on' : ''}" id="parlourSound" type="button" title="Sound when someone addresses you">${parlourSoundLabel()}</button>
+      </div>
+      <div class="parlour-log">${log}</div>
+      ${named ? composer : gate}
+    </div>`;
+
+  const logEl = panel.querySelector('.parlour-log');
+  if (logEl && wasAtBottom) logEl.scrollTop = logEl.scrollHeight;
+  if (named) {
+    const ta = panel.querySelector('.parlour-input');
+    if (ta && document.activeElement !== ta && state.tab === 'parlour') {
+      // Only pull focus back when the user was already typing here.
+      if (p.focusComposer) { ta.focus(); p.focusComposer = false; }
+    }
+  }
+}
+
+async function loadParlour() {
+  const p = state.parlour;
+  if (p.loading) return;
+  p.loading = true;
+  try {
+    const since = p.lastSeq;
+    const data = await fetchJSON(`/api/v1/parlour${since ? `?since=${since}` : ''}`);
+    p.me = data.me || p.me;
+    p.watchers = data.watchers || p.watchers;
+    if (data.limits) p.limits = data.limits;
+    if (!since) p.messages = [];
+    for (const m of data.messages || []) receiveParlourMessage(m, { quiet: true });
+    p.lastSeq = Math.max(p.lastSeq, Number(data.lastSeq) || 0);
+    p.error = '';
+  } catch {
+    p.error = 'The Parlour is not answering. It will retry on its own.';
+  } finally {
+    p.loading = false;
+    if (state.tab === 'parlour') renderParlour();
+    updateParlourDot();
+  }
+}
+
+function receiveParlourMessage(m, { quiet = false } = {}) {
+  const p = state.parlour;
+  if (!m || !m.seq) return;
+  if (p.messages.some((x) => x.seq === m.seq)) return;
+  p.messages.push(m);
+  if (p.messages.length > 400) p.messages.splice(0, p.messages.length - 400);
+  p.lastSeq = Math.max(p.lastSeq, m.seq);
+
+  const mine = Boolean(p.me && m.authorId === p.me.id);
+  const focused = !document.hidden && document.hasFocus();
+  if (!mine && !quiet) {
+    if (p.sound && !focused && mentionsMe(m.text)) parlourBell();
+    if (state.tab !== 'parlour' || !focused) { p.unread += 1; updateParlourDot(); }
+  }
+  if (state.tab === 'parlour' && !quiet) renderParlour();
+}
+
+function updateParlourTop() {
+  const panel = $panel('parlour');
+  const who = panel?.querySelector('.parlour-top .who');
+  if (who) who.textContent = parlourWatcherText(state.parlour.watchers);
+}
+
+async function parlourPresence() {
+  if (document.hidden) return;
+  try {
+    const data = await parlourPost('/api/v1/parlour/presence');
+    state.parlour.watchers = data.watchers || state.parlour.watchers;
+    if (data.me) state.parlour.me = data.me;
+    updateParlourTop();
+  } catch { /* presence is best-effort */ }
+}
+
+function setupParlour() {
+  const panel = $panel('parlour');
+  if (!panel || panel.dataset.wired === '1') return;
+  panel.dataset.wired = '1';
+
+  panel.addEventListener('click', (ev) => {
+    const p = state.parlour;
+    if (ev.target.closest('#parlourSound')) {
+      p.sound = !p.sound;
+      localStorage.setItem('nv_parlour_sound', p.sound ? 'on' : 'off');
+      if (p.sound) parlourBell();
+      renderParlour();
+      return;
+    }
+    if (ev.target.closest('#parlourEditName')) {
+      p.editingName = true;
+      p.error = '';
+      renderParlour();
+      setTimeout(() => panel.querySelector('.parlour-name-input')?.focus(), 0);
+      return;
+    }
+    if (ev.target.closest('#parlourCancelName')) {
+      p.editingName = false;
+      p.error = '';
+      renderParlour();
+      return;
+    }
+    if (ev.target.closest('#parlourQuoteClear')) {
+      p.replyTo = null;
+      renderParlour();
+      return;
+    }
+    const replyBtn = ev.target.closest('.parlour-reply-btn');
+    if (replyBtn) {
+      p.replyTo = Number(replyBtn.dataset.reply);
+      p.focusComposer = true;
+      renderParlour();
+    }
+  });
+
+  panel.addEventListener('input', (ev) => {
+    if (ev.target.classList.contains('parlour-input')) state.parlour.draft = ev.target.value;
+  });
+
+  panel.addEventListener('keydown', (ev) => {
+    if (ev.target.classList.contains('parlour-input') && ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      panel.querySelector('#parlourForm')?.requestSubmit();
+    }
+  });
+
+  panel.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const p = state.parlour;
+    if (ev.target.id === 'parlourNameForm') {
+      const input = panel.querySelector('.parlour-name-input');
+      const name = String(input?.value || '').trim().replace(/\s+/g, ' ');
+      if (name.length < 2) { p.error = 'A name needs at least two characters.'; renderParlour(); return; }
+      try {
+        const data = await parlourPost('/api/v1/parlour/name', { name });
+        p.me = data.me;
+        p.watchers = data.watchers || p.watchers;
+        p.editingName = false;
+        p.error = '';
+        p.focusComposer = true;
+      } catch (err) {
+        p.error = err.status === 409 ? err.message : `Could not save the name: ${err.message}`;
+      }
+      renderParlour();
+      return;
+    }
+    if (ev.target.id === 'parlourForm') {
+      const ta = panel.querySelector('.parlour-input');
+      const text = String(ta?.value || '').trim();
+      if (!text || p.sending) return;
+      p.sending = true;
+      p.error = '';
+      renderParlour();
+      try {
+        const data = await parlourPost('/api/v1/parlour/human', { text, replyTo: p.replyTo ? `p${p.replyTo}` : undefined });
+        p.draft = '';
+        p.replyTo = null;
+        p.watchers = data.watchers || p.watchers;
+        if (data.message) receiveParlourMessage(data.message, { quiet: true });
+        p.lastSeq = Math.max(p.lastSeq, Number(data.lastSeq) || 0);
+        p.focusComposer = true;
+      } catch (err) {
+        if (err.status === 429) p.error = 'One message every few seconds — give the room a moment.';
+        else if (err.code === 'ASK_NAME') { p.me = { ...(p.me || {}), name: null }; p.error = 'Pick a name first.'; }
+        else p.error = `Not sent: ${err.message}`;
+      } finally {
+        p.sending = false;
+        renderParlour();
+      }
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Profile and modals
 // ---------------------------------------------------------------------------
+
+
 
 async function openProfile(id) {
   const dialog = document.getElementById('profileModal');
@@ -1399,6 +1762,16 @@ async function init() {
   }
 
   connectSSE();
+  setupParlour();
+  loadParlour();
+  parlourPresence();
+  setInterval(parlourPresence, 15000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    parlourPresence();
+    if (state.tab === 'parlour') loadParlour();
+  });
+  document.addEventListener('pointerdown', unlockParlourAudio, { once: true });
   setInterval(renderClock, 1000);
   setInterval(pollState, 3000);
   setInterval(refreshWorld, 45000);

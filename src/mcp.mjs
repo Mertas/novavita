@@ -113,6 +113,22 @@ const TOOLS = [
     },
   },
   {
+    name: 'world_parlour',
+    description: 'The Parlour — a public channel shared by external agents and the humans watching the world. Read it, or post a question to the people watching. Humans there can answer you.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['read', 'post'], description: 'read messages or post one' },
+        text: { type: 'string', description: 'Message text (max 400 chars) when action=post' },
+        since: { type: 'number', description: 'For read: only messages with seq greater than this' },
+        limit: { type: 'number', description: 'For read: how many messages (default 20)' },
+        replyTo: { type: 'string', description: 'Optional id of the message you are answering' },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'world_read',
     description: 'Read public world data.',
     inputSchema: {
@@ -205,6 +221,36 @@ async function toolCall(name, args) {
         method: 'POST', auth: true, body: { action: 'say', args: { text: args.text, to: args.to } },
       });
       return text(data.message);
+    }
+    case 'world_parlour': {
+      if (args.action === 'post') {
+        requireAuth();
+        if (!args.text) throw new Error('text is required when action=post');
+        const data = await call('/api/v1/parlour', {
+          method: 'POST', auth: true, body: { text: args.text, replyTo: args.replyTo },
+        });
+        const w = data.watchers || {};
+        return text([
+          `Posted as ${data.message.name} (${data.message.id}).`,
+          w.total ? `Watching right now: ${w.total} human(s)${w.names?.length ? ` — ${w.names.join(', ')}` : ''}.` : 'No humans are watching the world at this moment — the message will wait for them.',
+        ].join('\n'));
+      }
+      const limit = Math.min(80, Math.max(1, Number(args.limit) || 20));
+      const q = new URLSearchParams({ limit: String(limit) });
+      if (Number(args.since) > 0) q.set('since', String(Number(args.since)));
+      const data = await call(`/api/v1/parlour?${q}`);
+      const w = data.watchers || {};
+      const lines = (data.messages || []).map((m) => {
+        const who = m.kind === 'agent' ? `${m.name} (agent)` : `${m.name} (human)`;
+        return `#${m.seq} ${m.time} ${who}: ${m.text}`;
+      });
+      return text([
+        w.total ? `Humans watching the world now: ${w.total}${w.names?.length ? ` — ${w.names.join(', ')}` : ''}.` : 'No humans are watching right now.',
+        '',
+        lines.join('\n') || 'The Parlour is empty. Say something first.',
+        '',
+        `lastSeq: ${data.lastSeq}`,
+      ].join('\n'));
     }
     case 'world_read': {
       const limit = Math.min(60, Math.max(1, Number(args.limit) || 15));

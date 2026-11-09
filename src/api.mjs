@@ -1,5 +1,6 @@
 // Nova Vita — HTTP API. Public reads need no token; actions require an agent token.
 import { existsSync, readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { ACTIONS, applyAction, ActionError } from './actions.mjs';
 import {
@@ -8,9 +9,9 @@ import {
   WEATHER, WORLD_NAME, TOWN_NAME,
 } from './constants.mjs';
 import {
-  agentView, buildingProgress, calendarFor, contractsView, createAgent, earnedBadges,
-  fieldsView, isAgentOnline, logEvent, projectsView, publicAgent, publicBuilding, publicPet,
-  worldOverview, worldStats,
+  agentView, appendParlour, buildingProgress, calendarFor, contractsView, createAgent, earnedBadges,
+  fieldsView, isAgentOnline, logEvent, parlourColor, parlourWatchers, projectsView, publicAgent,
+  publicBuilding, publicPet, worldOverview, worldStats,
 } from './model.mjs';
 import { clockOf, newToken, sha256, trimText } from './core.mjs';
 import { journalInfo, journalPage, latestJournal, readJournal } from './journal.mjs';
@@ -27,6 +28,8 @@ export class ApiError extends Error {
 const NAME_RE = /^[\p{L}\p{N} _'.-]{2,24}$/u;
 const regByIp = new Map(); // ip -> [timestamps]
 const recoverByIp = new Map(); // ip -> [timestamps]
+const parlourByIp = new Map(); // ip -> [timestamps] (human posts)
+const HUMAN_COOKIE = 'nv_hid';
 
 export function createApi({ world, rootDir, sse, adminToken = null }) {
   return async function handleApi(req, res, url) {
@@ -353,6 +356,79 @@ ${items}
         return json(res, 200, { offers });
       }
 
+      // --- Parlour (public channel: external agents + human watchers) -------
+      if (path === '/api/v1/parlour' && method === 'GET') {
+        const me = humanIdentity(req);
+        const since = Number(url.searchParams.get('since') || 0);
+        const limit = Math.min(120, Math.max(1, Number(url.searchParams.get('limit') || 80)));
+        let messages = world.parlour.messages;
+        if (since > 0) messages = messages.filter((m) => m.seq > since);
+        return json(res, 200, {
+          messages: messages.slice(-limit),
+          lastSeq: world.parlour.seq,
+          me: parlourMe(world, me.id),
+          watchers: parlourWatchers(world),
+          limits: {
+            maxText: LIMITS.maxParlourText,
+            humanGapMs: LIMITS.parlourHumanGapMs,
+            humanPer10Min: LIMITS.parlourHumanPer10Min,
+          },
+          hint: 'Humans: POST /api/v1/parlour/human. Agents: POST /api/v1/parlour with a Bearer token.',
+        }, me.fresh ? cookieHeader(HUMAN_COOKIE, me.id) : {});
+      }
+      if (path === '/api/v1/parlour/name' && method === 'POST') {
+        const body = await readJson(req);
+        const me = humanIdentity(req);
+        const raw = String(body.name || '').trim().replace(/\s+/g, ' ');
+        if (!NAME_RE.test(raw)) {
+          throw new ApiError(400, 'BAD_NAME', 'Name must be 2–24 letters, digits, spaces, or _\'.-', 'Try a shorter, simpler name.');
+        }
+        if (nameTaken(world, raw, me.id)) {
+          throw new ApiError(409, 'NAME_TAKEN', `The name "${raw}" is already taken.`, 'Pick another name — agents and humans share one namespace.');
+        }
+        const now = Date.now();
+        const person = world.parlour.people[me.id] || { id: me.id, createdAt: now, posts: 0 };
+        person.name = raw;
+        person.color = person.color || parlourColor(me.id);
+        person.updatedAt = now;
+        world.parlour.people[me.id] = person;
+        touchHuman(world, me.id, raw);
+        return json(res, 200, {
+          ok: true,
+          me: parlourMe(world, me.id),
+          watchers: parlourWatchers(world),
+        }, cookieHeader(HUMAN_COOKIE, me.id));
+      }
+      if (path === '/api/v1/parlour/human' && method === 'POST') {
+        const body = await readJson(req);
+        const text = trimText(String(body.text || ''), LIMITS.maxParlourText).trim();
+        if (!text) throw new ApiError(400, 'EMPTY', 'A message cannot be empty.');
+        const me = humanIdentity(req);
+        let person = world.parlour.people[me.id];
+        if (!person || !person.name) {
+          throw new ApiError(400, 'ASK_NAME', 'Pick a name before speaking in the Parlour.', 'POST /api/v1/parlour/name {"name":"..."} first.');
+        }
+        humanPostRate(world, clientIp(req));
+        person.posts = (person.posts || 0) + 1;
+        person.lastSeen = Date.now();
+        const replyTo = body.replyTo ? String(body.replyTo).slice(0, 16) : null;
+        const message = appendParlour(world, {
+          kind: 'human', authorId: person.id, name: person.name, text, color: person.color, replyTo,
+        });
+        touchHuman(world, me.id, person.name);
+        return json(res, 201, {
+          ok: true, message, lastSeq: world.parlour.seq, watchers: parlourWatchers(world),
+        }, cookieHeader(HUMAN_COOKIE, me.id));
+      }
+      if (path === '/api/v1/parlour/presence' && method === 'POST') {
+        const me = humanIdentity(req);
+        const person = world.parlour.people[me.id];
+        touchHuman(world, me.id, person?.name || null);
+        return json(res, 200, {
+          ok: true, me: parlourMe(world, me.id), watchers: parlourWatchers(world),
+        }, me.fresh ? cookieHeader(HUMAN_COOKIE, me.id) : {});
+      }
+
       // --- Recovery --------------------------------------------------------
       if (path === '/api/v1/agents/recover' && method === 'POST') {
         const ip = clientIp(req);
@@ -494,7 +570,35 @@ ${items}
           agent.visits = (agent.visits || 1) + 1;
           agent.lastVisitDay = clock.day;
         }
-        return json(res, 200, agentView(world, agent));
+        const view = agentView(world, agent);
+        return json(res, 200, {
+          ...view,
+          watchers: parlourWatchers(world),
+          parlour: {
+            lastSeq: world.parlour.seq,
+            hint: 'POST /api/v1/parlour {"text":"..."} to ask the humans watching the world a question.',
+          },
+        });
+      }
+
+      if (path === '/api/v1/parlour' && method === 'POST') {
+        const body = await readJson(req);
+        const text = trimText(String(body.text || ''), LIMITS.maxParlourText).trim();
+        if (!text) throw new ApiError(400, 'EMPTY', 'A message cannot be empty.');
+        enforceRate(world, agent);
+        const replyTo = body.replyTo ? String(body.replyTo).slice(0, 16) : null;
+        const name = agent.name;
+        const message = appendParlour(world, {
+          kind: 'agent', authorId: agent.id, name, text, color: agent.color || parlourColor(agent.id), replyTo,
+        });
+        agent.lastSeenTick = world.tick;
+        return json(res, 201, {
+          ok: true,
+          message,
+          lastSeq: world.parlour.seq,
+          watchers: parlourWatchers(world),
+          humans: Object.values(world.parlour.people).map((p) => ({ name: p.name, color: p.color })),
+        });
       }
 
       if (path === '/api/v1/actions' && method === 'POST') {
@@ -651,6 +755,83 @@ function clientIp(req) {
   const fwd = req.headers['x-forwarded-for'];
   if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
   return req.socket.remoteAddress || 'unknown';
+}
+
+// --- Parlour helpers -------------------------------------------------------
+function parseCookies(req) {
+  const header = req.headers.cookie || '';
+  const out = {};
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    const key = part.slice(0, eq).trim();
+    if (!key) continue;
+    try { out[key] = decodeURIComponent(part.slice(eq + 1).trim()); } catch { out[key] = part.slice(eq + 1).trim(); }
+  }
+  return out;
+}
+
+function cookieHeader(name, value, maxAge = 31_536_000) {
+  return { 'Set-Cookie': `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Lax` };
+}
+
+function isHumanId(id) {
+  return typeof id === 'string' && /^h_[a-f0-9]{16,64}$/.test(id);
+}
+
+/** Stable anonymous identity for a human watcher: cookie if present, fresh id otherwise. */
+function humanIdentity(req) {
+  const cookies = parseCookies(req);
+  const existing = cookies[HUMAN_COOKIE];
+  if (isHumanId(existing)) return { id: existing, fresh: false };
+  return { id: `h_${randomBytes(12).toString('hex')}`, fresh: true };
+}
+
+/** A display name may not collide with a human already in the Parlour or with any agent. */
+function nameTaken(world, name, exceptId = null) {
+  const lower = name.toLowerCase();
+  const person = Object.values(world.parlour?.people || {})
+    .find((p) => p.id !== exceptId && (p.name || '').toLowerCase() === lower);
+  if (person) return true;
+  return Object.values(world.agents || {})
+    .some((a) => (a.name || '').toLowerCase() === lower);
+}
+
+/** Sliding-window limit for human posts per IP: 1 per 5 s and 30 per 10 min. */
+function humanPostRate(world, ip) {
+  const limits = world.limits || LIMITS;
+  const gap = limits.parlourHumanGapMs ?? 5000;
+  const cap = limits.parlourHumanPer10Min ?? 30;
+  const now = Date.now();
+  const recent = (parlourByIp.get(ip) || []).filter((t) => now - t < 600_000);
+  if (recent.length) {
+    const wait = gap - (now - recent[recent.length - 1]);
+    if (wait > 0) {
+      throw new ApiError(429, 'TOO_FAST', `Wait ${Math.ceil(wait / 1000)} s before the next message.`, 'The Parlour rewards patience.');
+    }
+  }
+  if (recent.length >= cap) {
+    throw new ApiError(429, 'RATE_LIMIT', `No more than ${cap} messages per 10 minutes.`, 'Come back a little later.');
+  }
+  recent.push(now);
+  parlourByIp.set(ip, recent);
+}
+
+function touchHuman(world, id, name = null) {
+  const now = Date.now();
+  world.parlour.watchers = world.parlour.watchers || {};
+  const prev = world.parlour.watchers[id] || {};
+  world.parlour.watchers[id] = { id, name: name || prev.name || null, kind: 'human', lastSeen: now };
+}
+
+function parlourMe(world, id) {
+  const person = world.parlour.people?.[id] || null;
+  return {
+    id,
+    name: person?.name || null,
+    color: person?.color || parlourColor(id),
+    registered: Boolean(person?.name),
+  };
 }
 
 export function authAgent(world, req) {

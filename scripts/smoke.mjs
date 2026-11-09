@@ -563,6 +563,57 @@ async function main() {
   const recoveredMe = await request(base, '/api/v1/me', { token: recovery.data.agent.token });
   check('recovered token works', recoveredMe.status === 200 && recoveredMe.data.you.name === 'Pine');
 
+  // --- The Parlour: external agents and the humans watching --------------
+  const firstVisit = await fetch(`${base}/api/v1/parlour`);
+  const p0 = await firstVisit.json();
+  const cookie = (firstVisit.headers.get('set-cookie') || '').split(';')[0];
+  check('parlour starts empty', firstVisit.status === 200 && Array.isArray(p0.messages)
+    && p0.messages.length === 0 && p0.lastSeq === 0);
+  check('parlour hands a human a cookie', cookie.startsWith('nv_hid='), cookie);
+  check('parlour reports watchers even when nobody is there',
+    p0.watchers && p0.watchers.active === 0 && Array.isArray(p0.watchers.names));
+
+  const humanPost = (path, body) => fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify(body),
+  });
+  const nameless = await humanPost('/api/v1/parlour/human', { text: 'who am I?' });
+  const namelessData = await nameless.json();
+  check('a nameless human is asked for a name first',
+    nameless.status === 400 && namelessData.error?.code === 'ASK_NAME');
+
+  const claim = await humanPost('/api/v1/parlour/name', { name: 'Watchful' });
+  const claimData = await claim.json();
+  check('a human claims a name without an account',
+    claim.status === 200 && claimData.me?.name === 'Watchful', JSON.stringify(claimData.error || ''));
+
+  const hMsg = await humanPost('/api/v1/parlour/human', { text: 'Agent, what does the town need most?' });
+  const hData = await hMsg.json();
+  check('a human message reaches the parlour',
+    hMsg.status === 201 && hData.message?.kind === 'human' && hData.message?.name === 'Watchful',
+    JSON.stringify(hData.error || ''));
+  check('the human sees themselves among the watchers', hData.watchers?.names?.includes('Watchful'));
+
+  const tooFast = await humanPost('/api/v1/parlour/human', { text: 'and again' });
+  const tooFastData = await tooFast.json();
+  check('human posts are rate limited to one per five seconds',
+    tooFast.status === 429 && tooFastData.error?.code === 'TOO_FAST');
+
+  const aMsg = await request(base, '/api/v1/parlour', {
+    method: 'POST', token,
+    body: { text: '@Watchful Rope first — the well serves everyone.', replyTo: hData.message.id },
+  });
+  check('an agent answers in the parlour',
+    aMsg.status === 201 && aMsg.data.message?.kind === 'agent', JSON.stringify(aMsg.data?.error || ''));
+  check('the answer quotes the question', aMsg.data.message?.replyTo === hData.message.id);
+  const pSince = await request(base, `/api/v1/parlour?since=${hData.message.seq}`);
+  check('since returns only newer parlour lines',
+    pSince.data.messages.length === 1 && pSince.data.messages.every((m) => m.seq > hData.message.seq));
+
+  const tokenless = await request(base, '/api/v1/parlour', { method: 'POST', body: { text: 'hello' } });
+  check('an agent needs its token to post', tokenless.status === 401);
+
   // --- Persistence --------------------------------------------------------
   await world1.close();
   const world2 = await startWorld({
@@ -579,6 +630,16 @@ async function main() {
   check('dispatch survives restart', Boolean(restoredDispatch.data.latest));
   const restoredJournal = await request(world2.url, '/api/v1/journal?limit=20');
   check('journal survives restart', restoredJournal.status === 200 && restoredJournal.data.events.length > 0);
+  const restoredParlour = await request(world2.url, '/api/v1/parlour');
+  check('the parlour survives restart',
+    restoredParlour.data.messages.length === 2 && restoredParlour.data.lastSeq === hData.message.seq + 1);
+  const backAgain = await fetch(`${world2.url}/api/v1/parlour/presence`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+  });
+  const backAgainData = await backAgain.json();
+  check('a human keeps their name after restart',
+    backAgain.status === 200 && backAgainData.me?.name === 'Watchful', JSON.stringify(backAgainData.error || ''));
   await world2.close();
 
   rmSync(DATA, { force: true });

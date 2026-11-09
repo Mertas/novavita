@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
-  ACHIEVEMENTS, BUILDINGS, CROPS, EVENT_ICONS, FESTIVALS, ITEMS, MAX_EVENTS, MAX_CHAT,
+  ACHIEVEMENTS, BUILDINGS, CROPS, EVENT_ICONS, FESTIVALS, ITEMS, MAX_EVENTS, MAX_CHAT, MAX_PARLOUR,
   PROJECTS, QUEST_STEPS, RESIDENTS, RESIDENT_DETAILS, SEASONS, SPECIES, START_COINS,
   START_ENERGY, START_INVENTORY, TICKS_PER_DAY, TOWN_NAME, WORLD_NAME, ENGINE_VERSION,
   ADOPT_COST,
@@ -72,6 +72,7 @@ export function createWorld({ seed = 20261107, tickMs = 2000 } = {}) {
     bulletin: [],
     events: [],
     chat: [],
+    parlour: { seq: 0, messages: [], people: {}, watchers: {} },
     crops: {},
     animals: {},
     contracts: {},
@@ -353,6 +354,74 @@ export function logEvent(world, {
   }
   appendJournal(event);
   return event;
+}
+
+// ---------------------------------------------------------------------------
+// Parlour — public channel between external agents and human watchers
+// ---------------------------------------------------------------------------
+const PARLOUR_COLORS = [
+  '#e07a5f', '#81b29a', '#f2cc8f', '#8ea8de', '#c7a4d8',
+  '#e8a0bf', '#7cc6c0', '#d9a05b', '#9bbf6a', '#b98bd1',
+];
+
+export function parlourColor(id) {
+  const key = String(id || '');
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return PARLOUR_COLORS[hash % PARLOUR_COLORS.length];
+}
+
+// Who is currently watching the world tab (humans). Fresh ≤45s, stale ≤120s.
+export function parlourWatchers(world, now = Date.now()) {
+  const watchers = world.parlour?.watchers || {};
+  const active = [];
+  const idle = [];
+  for (const [id, entry] of Object.entries(watchers)) {
+    const age = now - (Number(entry.lastSeen) || 0);
+    if (age > 120000) {
+      delete watchers[id];
+      continue;
+    }
+    const view = { name: entry.name || null, kind: entry.kind || 'human' };
+    if (age <= 45000) active.push(view);
+    else idle.push(view);
+  }
+  return {
+    watching: active.length > 0,
+    active: active.length,
+    idle: idle.length,
+    total: active.length + idle.length,
+    names: active.map((w) => w.name).filter(Boolean),
+  };
+}
+
+export function appendParlour(world, { kind, authorId, name, text, color, replyTo = null }) {
+  const clock = clockOf(world.tick);
+  world.parlour = world.parlour || { seq: 0, messages: [], people: {}, watchers: {} };
+  world.parlour.seq = (Number(world.parlour.seq) || 0) + 1;
+  const message = {
+    id: `p${world.parlour.seq}`,
+    seq: world.parlour.seq,
+    at: new Date().toISOString(),
+    tick: world.tick,
+    day: clock.day,
+    time: clock.hhmm,
+    kind,
+    authorId,
+    name,
+    color: color || parlourColor(authorId || name),
+    text,
+    replyTo: replyTo || null,
+  };
+  world.parlour.messages.push(message);
+  if (world.parlour.messages.length > MAX_PARLOUR) {
+    world.parlour.messages.splice(0, world.parlour.messages.length - MAX_PARLOUR);
+  }
+  if (typeof world.onEvent === 'function') {
+    // channel lets the SSE hub route this to the parlour stream, not the world feed.
+    try { world.onEvent({ channel: 'parlour', type: 'parlour', message }); } catch { /* observers never break the world */ }
+  }
+  return message;
 }
 
 // ---------------------------------------------------------------------------
@@ -1035,6 +1104,14 @@ export function loadWorld(file, { tickMs = 2000 } = {}) {
   world.meta.tickMs = tickMs;
   world.pendingReplies = world.pendingReplies || [];
   world.offers = world.offers || {};
+  world.parlour = world.parlour || { seq: 0, messages: [], people: {}, watchers: {} };
+  world.parlour.seq = Number(world.parlour.seq) || 0;
+  world.parlour.messages = Array.isArray(world.parlour.messages) ? world.parlour.messages : [];
+  world.parlour.people = world.parlour.people || {};
+  world.parlour.watchers = world.parlour.watchers || {};
+  if (!world.parlour.seq && world.parlour.messages.length) {
+    world.parlour.seq = Math.max(...world.parlour.messages.map((m) => Number(m.seq) || 0));
+  }
   world.crops = world.crops || {};
   world.contracts = world.contracts || {};
   world.animals = world.animals || {};

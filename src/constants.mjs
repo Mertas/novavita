@@ -18,6 +18,9 @@ export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
 export const DEFAULT_TICK_MS = 2000;
 export const MAX_EVENTS = 600;
 export const MAX_CHAT = 240;
+// The Parlour is a public channel shared by external agents and human watchers.
+// It is deliberately separate from world.chat: residents never post there on their own.
+export const MAX_PARLOUR = 400;
 
 // ---------------------------------------------------------------------------
 // Time of day
@@ -432,6 +435,10 @@ export const LIMITS = {
   maxAgentsPerIpHour: 8,
   maxRecoveriesPerIpHour: 5,
   maxAgentsTotal: 500,
+  // Parlour: public agent ↔ human channel.
+  maxParlourText: 400,
+  parlourHumanGapMs: 5000,
+  parlourHumanPer10Min: 30,
 };
 
 // ---------------------------------------------------------------------------
