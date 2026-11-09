@@ -68,6 +68,9 @@ export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clien
   const head = buffer.length ? buffer[buffer.length - 1].seq : 0;
   const fromStart = Math.max(0, floor - 1);
   const base = { epoch, floor, lastSeq: head };
+  // Without the epoch the server cannot tell a current cursor from one minted before a
+  // reset. The page is still served, but it says so instead of implying continuity.
+  const epochUnverified = !clientEpoch && since > 0;
   // `from` is the cursor the catch-up STARTED from, carried across pages. Reporting the missing
   // interval relative to it keeps the gap visible after the client pages past the floor.
   const origin = Number.isFinite(from) && from >= 0 ? from : since;
@@ -86,7 +89,11 @@ export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clien
       gap: true,
       reset: true,
       ahead: since > head,
+      // A foreign history has no interval in this one: the cursor and the lost tail are not
+      // numbers here. `missing: null` alone would read as "nothing lost", so say it out loud.
       missing: null,
+      missingUnknown: true,
+      epochUnverified,
       complete: false,
     };
   }
@@ -110,6 +117,8 @@ export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clien
     // The interval the server cannot supply, computed from the start of this catch-up.
     // Reaching `more: false` does not mean the missing past was recovered.
     missing: hasMissing ? { from: missingFrom, to: missingTo } : null,
+    missingUnknown: false,
+    epochUnverified,
     // True only on the page that reaches the head with nothing unavailable since `from`.
     complete: !hasMissing && !more,
   };

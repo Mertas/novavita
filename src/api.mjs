@@ -192,6 +192,8 @@ ${items}
           reset: page.reset,
           ahead: page.ahead,
           missing: page.missing,
+          missingUnknown: page.missingUnknown,
+          epochUnverified: page.epochUnverified,
           complete: page.complete,
           events: page.events,
         });

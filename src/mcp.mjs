@@ -124,7 +124,9 @@ const TOOLS = [
           description: 'What to read',
         },
         limit: { type: 'number', description: 'How many records' },
-        since: { type: 'number', description: 'For events: from which seq' },
+        since: { type: 'number', description: 'For events/journal: from which seq' },
+        epoch: { type: 'string', description: 'For journal: the epoch your cursor belongs to; omit only for a first read' },
+        from: { type: 'number', description: 'For journal: the seq your catch-up started from, to keep gap reporting pinned' },
       },
       required: ['kind'],
       additionalProperties: false,
@@ -250,8 +252,29 @@ async function toolCall(name, args) {
         ].join('\n'));
       }
       if (args.kind === 'journal') {
-        const data = await call(`/api/v1/journal?limit=${limit}&since=${Number(args.since) || 0}`);
-        return text(data.events.map((e) => `${e.time} ${e.icon} ${e.text}`).join('\n') || 'Journal is empty.');
+        const q = new URLSearchParams({ limit: String(limit), since: String(Number(args.since) || 0) });
+        if (args.epoch) q.set('epoch', String(args.epoch));
+        if (Number.isFinite(Number(args.from))) q.set('from', String(Number(args.from)));
+        let data;
+        try {
+          data = await call(`/api/v1/journal?${q}`);
+        } catch (err) {
+          if (err.status === 409) {
+            const p = err.payload || {};
+            return text(`Cursor refused: since ${p.requestedSince} is beyond lastSeq ${p.lastSeq} in epoch ${p.epoch}.`
+              + `\nThat cursor was never issued in this journal. Resync: ${p.resync}`);
+          }
+          throw err;
+        }
+        const lines = data.events.map((e) => `${e.time} ${e.icon} ${e.text}`);
+        if (!lines.length) lines.push('Journal is empty.');
+        const notes = [`epoch ${data.epoch}`, `next ${data.nextSince}`, `more ${data.more}`, `gap ${data.gap}`];
+        if (data.reset) notes.push('reset');
+        if (data.missingUnknown) notes.push('missing unknown');
+        else if (data.missing) notes.push(`missing ${data.missing.from}–${data.missing.to}`);
+        if (data.epochUnverified) notes.push('epoch unverified — send epoch next time');
+        lines.push('', `[${notes.join(' · ')}]`);
+        return text(lines.join('\n'));
       }
       if (args.kind === 'contracts') {
         const data = await call('/api/v1/contracts');

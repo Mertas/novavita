@@ -350,6 +350,10 @@ async function main() {
   check('journal reports no gap at the head of the buffer', firstPage.data.gap === false);
   check('journal carries an epoch id', typeof firstPage.data.epoch === 'string' && /^[0-9a-f]{16}$/.test(firstPage.data.epoch));
   check('journal marks a normal page as not reset', firstPage.data.reset === false && firstPage.data.ahead === false);
+  check('a read from zero needs no epoch verification', firstPage.data.epochUnverified === false);
+  check('a cursor without the journal epoch is marked unverified', secondPage.data.epochUnverified === true);
+  const verifiedPage = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&epoch=${firstPage.data.epoch}&limit=5`);
+  check('sending the epoch verifies continuity', verifiedPage.data.epochUnverified === false && verifiedPage.data.missingUnknown === false);
 
   // A cursor beyond the head within this epoch — the server never issued it — must not look
   // like "caught up" or like a replay: it is a 409 with the contradiction and a resync URL.
@@ -362,6 +366,8 @@ async function main() {
   // A cursor annotated with another epoch is a reset, even when its number is beyond the head.
   const foreignEpoch = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&epoch=deadbeefdeadbeef&limit=5`);
   check('journal rejects a cursor from another epoch', foreignEpoch.data.reset === true && foreignEpoch.data.epoch !== 'deadbeefdeadbeef');
+  check('a foreign epoch says the missing interval is unknown', foreignEpoch.data.missing === null && foreignEpoch.data.missingUnknown === true);
+  check('a reset with the epoch sent is not marked unverified', foreignEpoch.data.epochUnverified === false);
   const foreignAhead = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq + 5000}&epoch=deadbeefdeadbeef&limit=5`);
   check('a foreign epoch replays even when its cursor is ahead', foreignAhead.status === 200
     && foreignAhead.data.reset === true && foreignAhead.data.ahead === true

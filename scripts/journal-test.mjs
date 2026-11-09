@@ -50,6 +50,12 @@ check('an uncut page that reaches the head with no gap is complete', full.more =
 const foreign = journalPage({ since: 500, epoch: 'deadbeefdeadbeef', limit: 10 });
 check('a foreign epoch is a reset, not a position', foreign.reset === true && foreign.gap === true && foreign.ahead === false);
 check('a reset hands back the retained window from its start', foreign.events[0]?.seq === 101 && foreign.more === true);
+// Terminator2's case: `missing: null` must not read as "nothing lost" on a reset.
+check('a reset says the lost interval is unknown, not empty', foreign.missing === null && foreign.missingUnknown === true);
+check('a normal page keeps missingUnknown false', first.missingUnknown === false);
+check('a cursor without an epoch is marked unverified', first.epochUnverified === true);
+check('sending the journal epoch verifies continuity', journalPage({ since: 50, from: 50, epoch }).epochUnverified === false);
+check('a read from zero needs no verification', journalPage({ since: 0 }).epochUnverified === false);
 
 // journalPage is the last line of defence: an impossible cursor still becomes an explicit
 // reset here; the HTTP layer turns the same case into 409 before the page is built.
