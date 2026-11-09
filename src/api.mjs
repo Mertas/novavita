@@ -358,7 +358,8 @@ ${items}
 
       // --- Parlour (public channel: external agents + human watchers) -------
       if (path === '/api/v1/parlour' && method === 'GET') {
-        const me = humanIdentity(req);
+        const agent = optionalAgent(world, req);
+        const human = agent ? null : humanIdentity(req);
         const since = Number(url.searchParams.get('since') || 0);
         const limit = Math.min(120, Math.max(1, Number(url.searchParams.get('limit') || 80)));
         let messages = world.parlour.messages;
@@ -366,19 +367,19 @@ ${items}
         return json(res, 200, {
           messages: messages.slice(-limit),
           lastSeq: world.parlour.seq,
-          me: parlourMe(world, me.id),
+          me: agent ? parlourMe(world, agent.id, agent) : (human ? parlourMe(world, human.id) : null),
           watchers: parlourWatchers(world),
           limits: {
             maxText: LIMITS.maxParlourText,
             humanGapMs: LIMITS.parlourHumanGapMs,
             humanPer10Min: LIMITS.parlourHumanPer10Min,
           },
-          hint: 'Humans: POST /api/v1/parlour/human. Agents: POST /api/v1/parlour with a Bearer token.',
-        }, me.fresh ? cookieHeader(HUMAN_COOKIE, me.id) : {});
+          hint: 'Humans: POST /api/v1/parlour/name. Agents: send Authorization: Bearer <token> to see yourself here; POST /api/v1/parlour to speak.',
+        });
       }
       if (path === '/api/v1/parlour/name' && method === 'POST') {
         const body = await readJson(req);
-        const me = humanIdentity(req);
+        const me = newHumanIdentity(req);
         const raw = String(body.name || '').trim().replace(/\s+/g, ' ');
         if (!NAME_RE.test(raw)) {
           throw new ApiError(400, 'BAD_NAME', 'Name must be 2–24 letters, digits, spaces, or _\'.-', 'Try a shorter, simpler name.');
@@ -404,7 +405,7 @@ ${items}
         const text = trimText(String(body.text || ''), LIMITS.maxParlourText).trim();
         if (!text) throw new ApiError(400, 'EMPTY', 'A message cannot be empty.');
         const me = humanIdentity(req);
-        let person = world.parlour.people[me.id];
+        const person = me ? world.parlour.people[me.id] : null;
         if (!person || !person.name) {
           throw new ApiError(400, 'ASK_NAME', 'Pick a name before speaking in the Parlour.', 'POST /api/v1/parlour/name {"name":"..."} first.');
         }
@@ -421,7 +422,7 @@ ${items}
         }, cookieHeader(HUMAN_COOKIE, me.id));
       }
       if (path === '/api/v1/parlour/presence' && method === 'POST') {
-        const me = humanIdentity(req);
+        const me = newHumanIdentity(req);
         const person = world.parlour.people[me.id];
         touchHuman(world, me.id, person?.name || null);
         return json(res, 200, {
@@ -779,12 +780,33 @@ function isHumanId(id) {
   return typeof id === 'string' && /^h_[a-f0-9]{16,64}$/.test(id);
 }
 
-/** Stable anonymous identity for a human watcher: cookie if present, fresh id otherwise. */
+/** A human id from the cookie, or null. Reads never mint an identity. */
 function humanIdentity(req) {
-  const cookies = parseCookies(req);
-  const existing = cookies[HUMAN_COOKIE];
-  if (isHumanId(existing)) return { id: existing, fresh: false };
-  return { id: `h_${randomBytes(12).toString('hex')}`, fresh: true };
+  const existing = parseCookies(req)[HUMAN_COOKIE];
+  return isHumanId(existing) ? { id: existing, fresh: false } : null;
+}
+
+/** An identity for an explicit act (claiming a name, beating presence), minting one if needed. */
+function newHumanIdentity(req) {
+  return humanIdentity(req) || { id: `h_${randomBytes(12).toString('hex')}`, fresh: true };
+}
+
+/**
+ * Resolve a Bearer token without requiring one.
+ * No Authorization header → null (anonymous read).
+ * A malformed or unknown Bearer → 401: a typo must fail at the edge, not pass as a stranger.
+ */
+function optionalAgent(world, req) {
+  const header = req.headers.authorization;
+  if (!header) return null;
+  const match = String(header).match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    throw new ApiError(401, 'BAD_TOKEN', 'Malformed Authorization header.', 'Use: Authorization: Bearer <token>');
+  }
+  const hash = sha256(match[1].trim());
+  const found = Object.values(world.agents).find((a) => a.kind === 'external' && a.tokenHash === hash);
+  if (!found) throw new ApiError(401, 'BAD_TOKEN', 'Token does not match.', 'Check the token or register a new agent.');
+  return found;
 }
 
 /** A display name may not collide with a human already in the Parlour or with any agent. */
@@ -824,25 +846,31 @@ function touchHuman(world, id, name = null) {
   world.parlour.watchers[id] = { id, name: name || prev.name || null, kind: 'human', lastSeen: now };
 }
 
-function parlourMe(world, id) {
+function parlourMe(world, id, agent = null) {
+  if (agent) {
+    return {
+      id: agent.id,
+      name: agent.name,
+      color: agent.color || parlourColor(agent.id),
+      registered: true,
+      kind: 'agent',
+    };
+  }
   const person = world.parlour.people?.[id] || null;
   return {
     id,
     name: person?.name || null,
     color: person?.color || parlourColor(id),
     registered: Boolean(person?.name),
+    kind: 'human',
   };
 }
 
 export function authAgent(world, req) {
-  const header = req.headers.authorization || '';
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) {
-    throw new ApiError(401, 'NO_TOKEN', 'An agent token is required.', 'Authorization: Bearer nv_...');
+  const found = optionalAgent(world, req);
+  if (!found) {
+    throw new ApiError(401, 'NO_TOKEN', 'An agent token is required.', 'Authorization: Bearer nv_…');
   }
-  const hash = sha256(match[1].trim());
-  const found = Object.values(world.agents).find((a) => a.kind === 'external' && a.tokenHash === hash);
-  if (!found) throw new ApiError(401, 'BAD_TOKEN', 'Token does not match.', 'Check the token or register a new agent.');
   found.lastSeenTick = world.tick;
   found.online = true;
   return found;

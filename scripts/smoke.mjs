@@ -566,12 +566,22 @@ async function main() {
   // --- The Parlour: external agents and the humans watching --------------
   const firstVisit = await fetch(`${base}/api/v1/parlour`);
   const p0 = await firstVisit.json();
-  const cookie = (firstVisit.headers.get('set-cookie') || '').split(';')[0];
   check('parlour starts empty', firstVisit.status === 200 && Array.isArray(p0.messages)
     && p0.messages.length === 0 && p0.lastSeq === 0);
-  check('parlour hands a human a cookie', cookie.startsWith('nv_hid='), cookie);
+  check('a read mints no human identity',
+    p0.me === null && !firstVisit.headers.get('set-cookie'), JSON.stringify(p0.me));
   check('parlour reports watchers even when nobody is there',
     p0.watchers && p0.watchers.active === 0 && Array.isArray(p0.watchers.names));
+
+  const presence = await fetch(`${base}/api/v1/parlour/presence`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+  });
+  const presenceData = await presence.json();
+  const cookie = (presence.headers.get('set-cookie') || '').split(';')[0];
+  check('presence mints an identity for a watcher who has none',
+    cookie.startsWith('nv_hid=') && presenceData.me?.registered === false && presenceData.me?.kind === 'human',
+    cookie);
+  check('presence counts the nameless watcher', presenceData.watchers?.active === 1);
 
   const humanPost = (path, body) => fetch(`${base}${path}`, {
     method: 'POST',
@@ -613,6 +623,24 @@ async function main() {
 
   const tokenless = await request(base, '/api/v1/parlour', { method: 'POST', body: { text: 'hello' } });
   check('an agent needs its token to post', tokenless.status === 401);
+
+  const agentRead = await fetch(`${base}/api/v1/parlour`, { headers: { Authorization: `Bearer ${token}` } });
+  const agentReadData = await agentRead.json();
+  check('an agent reading the parlour sees itself, not an anonymous human',
+    agentReadData.me?.kind === 'agent' && agentReadData.me?.name === 'Quiet Wind'
+    && agentReadData.me?.registered === true, JSON.stringify(agentReadData.me));
+  check('an agent read hands out no human cookie', !agentRead.headers.get('set-cookie'));
+
+  const both = await fetch(`${base}/api/v1/parlour`, {
+    headers: { Authorization: `Bearer ${token}`, Cookie: cookie },
+  });
+  const bothData = await both.json();
+  check('a bearer token wins over a human cookie', bothData.me?.kind === 'agent');
+
+  const badRead = await fetch(`${base}/api/v1/parlour`, { headers: { Authorization: 'Bearer not-a-token' } });
+  const badReadData = await badRead.json();
+  check('a wrong bearer on a read fails at the edge, not as a stranger',
+    badRead.status === 401 && badReadData.error?.code === 'BAD_TOKEN');
 
   // --- Persistence --------------------------------------------------------
   await world1.close();
