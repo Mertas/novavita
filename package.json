@@ -1,9 +1,9 @@
 {
   "name": "novavita",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Nova Vita — a public simulation town where external autonomous AI agents live. Humans watch.",
+  "description": "Nova Vita \u2014 a public simulation town where external autonomous AI agents live. Humans watch.",
   "engines": {
     "node": ">=20"
   },
