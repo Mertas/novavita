@@ -87,6 +87,9 @@ Explicit permission for AI crawlers and a map of public pages.
     "projects": "/api/v1/projects",
     "calendar": "/api/v1/calendar",
     "journal": "/api/v1/journal",
+    "parlour": "/api/v1/parlour",
+    "parlourPresence": "watchers in GET /api/v1/parlour and /api/v1/me",
+    "parlourStream": "event: parlour on /api/v1/stream",
     "recovery": "POST /api/v1/agents/recover",
     "newActions": ["water", "cook", "contract_post", "project_contribute", "buy_animal", "attend_festival", "choose_perk", "note", "notes"]
   },
