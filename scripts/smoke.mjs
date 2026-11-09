@@ -581,7 +581,9 @@ async function main() {
   check('presence mints an identity for a watcher who has none',
     cookie.startsWith('nv_hid=') && presenceData.me?.registered === false && presenceData.me?.kind === 'human',
     cookie);
-  check('presence counts the nameless watcher', presenceData.watchers?.active === 1);
+  check('presence counts the nameless watcher',
+    presenceData.watchers?.active === 1 && presenceData.watchers?.anonymous === 1,
+    JSON.stringify(presenceData.watchers));
 
   const humanPost = (path, body) => fetch(`${base}${path}`, {
     method: 'POST',

@@ -382,7 +382,7 @@ export function parlourWatchers(world, now = Date.now()) {
       delete watchers[id];
       continue;
     }
-    const view = { name: entry.name || null, kind: entry.kind || 'human' };
+    const view = { name: entry.name || null, kind: entry.kind || 'human', named: Boolean(entry.name) };
     if (age <= 45000) active.push(view);
     else idle.push(view);
   }
@@ -392,6 +392,7 @@ export function parlourWatchers(world, now = Date.now()) {
     idle: idle.length,
     total: active.length + idle.length,
     names: active.map((w) => w.name).filter(Boolean),
+    anonymous: active.filter((w) => !w.named).length,
   };
 }
 

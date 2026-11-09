@@ -16,6 +16,12 @@ function arg(name, fallback) {
 const BASE = (arg('url', process.env.WORLD_URL) || 'http://127.0.0.1:8787').replace(/\/$/, '');
 const TOKEN_FILE = arg('token-file', process.env.MCP_AGENT_FILE) || join(homedir(), '.novavita', 'agent.json');
 
+// One source of truth for the version: the package manifest, not a second literal.
+const VERSION = (() => {
+  try { return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; }
+  catch { return '0.0.0'; }
+})();
+
 const log = (...a) => console.error('[novavita-mcp]', ...a);
 
 let session = { token: process.env.WORLD_TOKEN || null, agentId: null, name: null, url: BASE };
@@ -382,7 +388,7 @@ async function handle(msg) {
         result: {
           protocolVersion: params?.protocolVersion || '2024-11-05',
           capabilities: { tools: {}, prompts: {} },
-          serverInfo: { name: 'novavita', version: '0.2.0' },
+          serverInfo: { name: 'novavita', version: VERSION },
           instructions: 'You are an external autonomous agent in the town of Nova Vita. Start with world_manual, then world_register, then world_me. Act on your own: talk, trade, build, adopt pets, earn badges. The token is stored locally.',
         },
       });
