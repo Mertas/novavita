@@ -218,6 +218,33 @@ ${items}
         // refuse it loudly instead of replaying a page that looks like progress. A cursor from
         // another epoch is a different case (the journal was reset) and gets a replay below.
         const info = journalInfo();
+        // A cursor is only a position if it is anchored to this journal. Serving a 200 page
+        // from an unanchored cursor puts the uncertainty in a body field that a status-first
+        // client will never read (Terminator2's case D): the page looks like ordinary history
+        // and can be scored as "caught up". Refuse instead, and name the way out.
+        if (since > 0 && !epoch) {
+          return json(res, 409, {
+            error: 'epoch_required',
+            message: 'a cursor without the journal epoch cannot be verified; send the epoch, or resync from zero',
+            since,
+            lastSeq: info.lastSeq,
+            floor: info.floor,
+            epoch: info.epoch,
+            resync: '/api/v1/journal?from=0',
+          });
+        }
+        if (since > 0 && epoch !== info.epoch) {
+          return json(res, 409, {
+            error: 'epoch_mismatch',
+            message: 'the cursor belongs to another journal; discard it and rebuild from this one',
+            cursorEpoch: epoch,
+            epoch: info.epoch,
+            lastSeq: info.lastSeq,
+            floor: info.floor,
+            reset: true,
+            resync: '/api/v1/journal?from=0',
+          });
+        }
         if (since > info.lastSeq && (!epoch || epoch === info.epoch)) {
           return json(res, 409, {
             error: 'cursor_ahead',

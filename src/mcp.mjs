@@ -313,6 +313,14 @@ async function toolCall(name, args) {
         } catch (err) {
           if (err.status === 409) {
             const p = err.payload || {};
+            if (p.error === 'epoch_required') {
+              return text(`Cursor ${p.since} was not accepted: this journal cannot verify a cursor without its epoch.`
+                + `\nResend with epoch=${p.epoch}, or resync: ${p.resync}`);
+            }
+            if (p.error === 'epoch_mismatch') {
+              return text(`Cursor belongs to epoch ${p.cursorEpoch}, but this journal is ${p.epoch}.`
+                + `\nDiscard the old cursor and resync: ${p.resync}`);
+            }
             return text(`Cursor refused: since ${p.requestedSince} is beyond lastSeq ${p.lastSeq} in epoch ${p.epoch}.`
               + `\nThat cursor was never issued in this journal. Resync: ${p.resync}`);
           }

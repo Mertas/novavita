@@ -345,43 +345,52 @@ async function main() {
   const seqs = firstPage.data.events.map((e) => e.seq);
   check('journal pages oldest-first', seqs.length === 5 && seqs.every((s, i) => i === 0 || s > seqs[i - 1]));
   check('journal exposes a catch-up cursor', firstPage.data.nextSince === seqs[seqs.length - 1] && firstPage.data.more === true);
+  // Terminator2's case D: the same request (a cursor, no epoch) must not come back as a
+  // 200 page that only a body-reading client can tell apart from verified history. A
+  // status-first client would count it as caught up. The cursor is refused instead.
   const secondPage = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&limit=5`);
-  check('next page continues after cursor', secondPage.data.events[0].seq > firstPage.data.nextSince);
+  check('a cursor without the journal epoch is refused, not served', secondPage.status === 409
+    && secondPage.data.error === 'epoch_required' && secondPage.data.since === firstPage.data.nextSince
+    && secondPage.data.epoch === firstPage.data.epoch && secondPage.data.events === undefined);
   check('journal reports no gap at the head of the buffer', firstPage.data.gap === false);
   check('journal carries an epoch id', typeof firstPage.data.epoch === 'string' && /^[0-9a-f]{16}$/.test(firstPage.data.epoch));
   check('journal marks a normal page as not reset', firstPage.data.reset === false && firstPage.data.ahead === false);
   check('a read from zero needs no epoch verification', firstPage.data.epochUnverified === false);
-  check('a cursor without the journal epoch is marked unverified', secondPage.data.epochUnverified === true);
   const verifiedPage = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&epoch=${firstPage.data.epoch}&limit=5`);
+  check('next page continues after cursor', verifiedPage.data.events[0].seq > firstPage.data.nextSince);
   check('sending the epoch verifies continuity', verifiedPage.data.epochUnverified === false && verifiedPage.data.missingUnknown === false);
 
   // A cursor beyond the head within this epoch — the server never issued it — must not look
   // like "caught up" or like a replay: it is a 409 with the contradiction and a resync URL.
-  const aheadPage = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq + 5000}&limit=5`);
+  const aheadPage = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq + 5000}&epoch=${firstPage.data.epoch}&limit=5`);
   check('journal refuses a cursor beyond the head', aheadPage.status === 409
     && aheadPage.data.error === 'cursor_ahead' && aheadPage.data.requestedSince === firstPage.data.lastSeq + 5000
     && aheadPage.data.lastSeq === firstPage.data.lastSeq && aheadPage.data.resync === '/api/v1/journal?from=0');
   check('a refused cursor carries no events', aheadPage.data.events === undefined);
 
-  // A cursor annotated with another epoch is a reset, even when its number is beyond the head.
+  // A cursor annotated with another epoch is not a position in this journal. Serving a reset
+  // page as 200 has the same shape problem as case D, so it is refused with the way out.
   const foreignEpoch = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&epoch=deadbeefdeadbeef&limit=5`);
-  check('journal rejects a cursor from another epoch', foreignEpoch.data.reset === true && foreignEpoch.data.epoch !== 'deadbeefdeadbeef');
-  check('a foreign epoch says the missing interval is unknown', foreignEpoch.data.missing === null && foreignEpoch.data.missingUnknown === true);
-  check('a reset with the epoch sent is not marked unverified', foreignEpoch.data.epochUnverified === false);
+  check('journal rejects a cursor from another epoch', foreignEpoch.status === 409
+    && foreignEpoch.data.error === 'epoch_mismatch' && foreignEpoch.data.cursorEpoch === 'deadbeefdeadbeef'
+    && foreignEpoch.data.epoch === firstPage.data.epoch && foreignEpoch.data.reset === true
+    && foreignEpoch.data.events === undefined);
   const foreignAhead = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq + 5000}&epoch=deadbeefdeadbeef&limit=5`);
-  check('a foreign epoch replays even when its cursor is ahead', foreignAhead.status === 200
-    && foreignAhead.data.reset === true && foreignAhead.data.ahead === true
-    && foreignAhead.data.events.length === 5 && foreignAhead.data.epoch === firstPage.data.epoch);
+  check('a foreign epoch is refused even when its cursor is ahead', foreignAhead.status === 409
+    && foreignAhead.data.error === 'epoch_mismatch');
+  const zeroForeign = await request(base, '/api/v1/journal?since=0&epoch=deadbeefdeadbeef&limit=5');
+  check('a read from zero ignores a stale epoch', zeroForeign.status === 200 && zeroForeign.data.epoch === firstPage.data.epoch);
 
   // `from` pins the start of the catch-up, so a missing interval keeps being reported after the
   // client has paged past the floor; `complete` is only true when nothing is missing.
-  const pinned = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&from=0&limit=5`);
+  const pinned = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&from=0&epoch=${firstPage.data.epoch}&limit=5`);
   check('journal accepts a pinned catch-up origin', pinned.status === 200 && pinned.data.gap === false && pinned.data.missing === null);
-  const atHead = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq}&from=${firstPage.data.lastSeq}`);
+  const atHead = await request(base, `/api/v1/journal?since=${firstPage.data.lastSeq}&from=${firstPage.data.lastSeq}&epoch=${firstPage.data.epoch}`);
   check('journal marks a clean catch-up complete', atHead.status === 200 && atHead.data.more === false
-    && atHead.data.gap === false && atHead.data.complete === true);
+    && atHead.data.gap === false && atHead.data.complete === true
+    && atHead.data.epochUnverified === false);
   // Terminator2's second catch: an anchor ahead of the cursor must not shrink the missing report.
-  const clamped = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&from=${firstPage.data.lastSeq}`);
+  const clamped = await request(base, `/api/v1/journal?since=${firstPage.data.nextSince}&from=${firstPage.data.lastSeq}&epoch=${firstPage.data.epoch}`);
   check('journal clamps an anchor ahead of the cursor', clamped.status === 200
     && clamped.data.from === firstPage.data.nextSince && clamped.data.fromClamped === true);
   // A garbled cursor is not a fresh read: refuse it instead of silently starting at zero.

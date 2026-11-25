@@ -128,8 +128,10 @@ export function journalPage({ since = 0, kinds = null, limit = 200, epoch: clien
     epochUnverified,
     from: origin,
     fromClamped,
-    // True only on the page that reaches the head with nothing unavailable since `from`.
-    complete: !hasMissing && !more,
+    // True only on a verified page that reaches the head with nothing unavailable since
+    // `from`. An unanchored cursor can reach the head too, and calling that complete invites
+    // a status-first client to score a history it never watched as whole.
+    complete: !hasMissing && !more && !epochUnverified,
   };
 }
 

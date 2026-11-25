@@ -738,38 +738,46 @@ origin and stay reported after you page past the floor. `complete: true` appears
 page that reaches `lastSeq` with nothing missing since `from`; it is `false` on every other
 page, including the last page of an incomplete catch-up.
 
-If you send `epoch=<epoch>` from a different journal, the response has `reset: true`,
-`gap: true`, `missingUnknown: true`, and replays the retained window from its start —
-`nextSince` is a valid cursor again. Discard your old cursor on a reset; a cursor the server
-never issued in this epoch is not a position.
+If you send `epoch=<epoch>` from a different journal, that is not a position in this history
+and the server refuses it: `409 epoch_mismatch`, with the cursor's epoch, the current epoch,
+the floor, the head, `reset: true`, and the resync URL. Discard the old cursor, call `resync`,
+and continue with the epoch you get back.
 
-A `since` beyond `lastSeq` *within the current epoch* is not a reset: it is a cursor the
-server never issued, so it answers `409` instead of fabricating a plausible page. The body
-names the contradiction and the way out:
+A `since` beyond `lastSeq` *within the current epoch* is also refused rather than given a
+plausible page. The body names the contradiction and the way out:
 
 ```json
 {"error":"cursor_ahead","requestedSince":999999,"lastSeq":832,"floor":1,
  "epoch":"97132ec8d33b817a","resync":"/api/v1/journal?from=0"}
 ```
 
-Call the `resync` URL (or `?since=0`) and rebuild. If you are unsure which journal your
-cursor belongs to, send the `epoch` you stored: a foreign epoch gets the replay above, while
-a matching epoch with an impossible cursor gets the `409`.
+Call the `resync` URL (or `?since=0`) and rebuild. Send the `epoch` you stored on every
+catch-up: a matching epoch with an impossible cursor gets the `409`, and a foreign one gets
+`epoch_mismatch`.
 
-**A cursor without an epoch is a guess.** The server cannot check it against a history it
-never saw. If the journal was reset and the new one has already grown past your old seq, the
-response is an ordinary `200` page from a history you never watched. Such pages carry
-`epochUnverified: true`; the flag is `false` when you sent the epoch, and on a read from
-zero. Store the `epoch` from every response and send it on catch-up — that is what turns the
-`409`/reset split from a promise into a check.
+**A cursor without an epoch is refused, not guessed at.** The server cannot check such a
+cursor against a history it never saw. If the journal was reset and the new one has already
+grown past the old seq, a `200` page from a history the client never watched is
+indistinguishable — by status or shape — from verified history; a client that branches on
+status alone would score it as progress. So a `since > 0` without `epoch` is
+`409 epoch_required`:
+
+```json
+{"error":"epoch_required","since":832,"lastSeq":832,"floor":1,
+ "epoch":"97132ec8d33b817a","resync":"/api/v1/journal?from=0"}
+```
+
+Send `epoch` (stored from any earlier response) with the same cursor, or resync from zero.
+A read from zero needs no epoch, and an `epoch` on a read from zero is ignored. With this
+rule a `2xx` journal page is always anchored in the current epoch: the legacy
+`epochUnverified` field is `false` on every `2xx` response.
 
 **Scoring a catch-up.** `missing` is the server's unavailable range from your `from` anchor,
 not a statement about your own store. A client that already retained those events has no
 reconstruction gap, even though the server reports one; score coverage against the pages the
 client actually kept. `complete` is page-level (reached `lastSeq`, nothing missing since
-`from`), while `epochUnverified` is history-level — a page can be `complete: true` and still
-carry `epochUnverified: true`. `missingUnknown` is separate from both: it appears only on a
-reset, where the lost interval has no seq numbers in the new history.
+`from`, cursor anchored in this epoch). `missingUnknown` is separate: it belongs to the
+refused foreign-epoch case, where the lost interval has no seq numbers in the new history.
 
 **Anchor and cursor must agree.** `from` may be older than `since` — that is how a catch-up
 carries its origin across pages — but it must not be newer. `since=200&from=250` says "I have

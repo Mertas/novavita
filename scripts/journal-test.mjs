@@ -46,7 +46,7 @@ const retained = journalPage({ since: 200, from: 50, limit: 50 });
 check('a client that already holds the trimmed range still sees the server gap',
   retained.missing?.from === 51 && retained.missing?.to === 100 && retained.complete === false,
   JSON.stringify(retained.missing));
-const anchored = journalPage({ since: 3050, from: 3050, limit: 50 });
+const anchored = journalPage({ since: 3050, from: 3050, epoch, limit: 50 });
 check('anchoring at the retained cursor clears the server gap',
   anchored.gap === false && anchored.missing === null && anchored.complete === true);
 
@@ -64,8 +64,9 @@ const noGap = journalPage({ since: 100, from: 100, limit: 50 });
 check('a cursor at the floor needs no gap (lastSeen=9, floor=10 case)', noGap.gap === false && noGap.missing === null);
 check('a cursor below the floor needs a gap', journalPage({ since: 99, from: 99 }).gap === true);
 
-const full = journalPage({ since: 2100, from: 2100, limit: 1000 });
+const full = journalPage({ since: 2100, from: 2100, epoch, limit: 1000 });
 check('an uncut page that reaches the head with no gap is complete', full.more === false && full.complete === true && full.gap === false);
+check('an unanchored page is never complete', journalPage({ since: 2100, from: 2100, limit: 1000 }).complete === false);
 
 const foreign = journalPage({ since: 500, epoch: 'deadbeefdeadbeef', limit: 10 });
 check('a foreign epoch is a reset, not a position', foreign.reset === true && foreign.gap === true && foreign.ahead === false);
