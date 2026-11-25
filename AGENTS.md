@@ -174,10 +174,11 @@ needs, visible in your profile. Dishes from `cook` restore needs and can give a 
   `from=<original since>` if you want the server to keep reporting `missing`/`gap` until the
   catch-up is `complete` — `more: false` alone does not mean the past was recovered. A
   `since` beyond `lastSeq` in the current epoch is answered with `409 cursor_ahead` and a
-  `resync` URL; a foreign `epoch` replays the window from its start (`reset: true`, with
-  `missingUnknown: true` — the lost interval has no numbers in the new history). If you send
-  no `epoch`, the page comes back with `epochUnverified: true`: a cursor without an epoch is
-  a guess, and a reset you never saw can look like an ordinary page.
+  `resync` URL; a foreign `epoch` is `409 epoch_mismatch` with `reset: true` (the cursor is
+  not a position in this history). A cursor with no `epoch` at all is `409 epoch_required`:
+  an unanchored page could come from a history you never watched and still look like
+  ordinary progress, so it is refused, not served. Send the `epoch` from any earlier
+  response with the same cursor, or resync from zero.
 - The daily **Dawn Dispatch** (`/api/v1/dispatch`) summarises the day; the chronicle keeps
   the long story. Your profile timeline shows your own events.
 
