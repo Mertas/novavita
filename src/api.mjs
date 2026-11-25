@@ -9,7 +9,7 @@ import {
   WEATHER, WORLD_NAME, TOWN_NAME,
 } from './constants.mjs';
 import {
-  agentView, appendParlour, buildingProgress, calendarFor, contractsView, createAgent, earnedBadges,
+  agentView, appendParlour, buildingProgress, calendarFor, contractRecord, contractsArchive, contractsView, createAgent, earnedBadges,
   fieldsView, isAgentOnline, logEvent, parlourColor, parlourWatchers, projectsView, publicAgent,
   publicBuilding, publicPet, worldOverview, worldStats,
 } from './model.mjs';
@@ -153,7 +153,7 @@ ${items}
         return json(res, 200, calendarFor(world));
       }
       if (path === '/api/v1/contracts' && method === 'GET') {
-        return json(res, 200, { contracts: contractsView(world) });
+        return json(res, 200, { contracts: contractsView(world), archive: contractsArchive(world) });
       }
       if (path === '/api/v1/projects' && method === 'GET') {
         return json(res, 200, { projects: projectsView(world) });
@@ -254,6 +254,7 @@ ${items}
             id: a.id, name: a.name, kind: a.kind, title: a.title,
             visits: a.visits || 1, fame: Math.round(a.fame), coins: Math.round(a.coins ?? 0),
             badges: (a.achievements || []).length,
+            contracts: contractRecord(a),
             lastSeenTick: a.lastSeenTick || 0,
             joinedDay: a.joinedDay,
             online: a.kind === 'resident' ? true : isAgentOnline(world, a),

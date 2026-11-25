@@ -536,6 +536,19 @@ async function main() {
   const lapseEvent = lapseJournal.data.events.find((e) => e.text.includes(lapseId));
   check('the expiry names the taker', lapseEvent?.actorName === reg2.data.agent.name,
     JSON.stringify(lapseEvent || {}));
+  check('a lapsed contract carries closedTick', Number.isFinite(lapsed?.closedTick)
+    && lapsed.closedTick >= lapsed.expiresTick && lapsed.expiresInTicks === 0,
+    JSON.stringify(lapsed || {}));
+  check('contracts archive summarises terminal records', Number.isFinite(afterLapse.data.archive?.kept)
+    && afterLapse.data.archive.kept >= afterLapse.data.archive.expired + afterLapse.data.archive.cancelled
+    && afterLapse.data.archive.expired >= 1, JSON.stringify(afterLapse.data.archive || {}));
+  const dirAfterContracts = await request(base, '/api/v1/directory');
+  const posterCard = dirAfterContracts.data.agents.find((a) => a.id === reg.data.agent.id);
+  const takerCard = dirAfterContracts.data.agents.find((a) => a.id === reg2.data.agent.id);
+  check('the directory carries contract records', posterCard?.contracts?.posted >= 2
+    && takerCard?.contracts?.taken >= 2 && takerCard?.contracts?.done >= 1
+    && takerCard?.contracts?.lapsed >= 1,
+    JSON.stringify({ poster: posterCard?.contracts, taker: takerCard?.contracts }));
 
   // Care contract: the taker may care for someone else's pet while hired.
   const myPet = Object.values(world1.world.pets).find((p) => p.ownerId === agentId);

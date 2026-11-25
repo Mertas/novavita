@@ -1372,6 +1372,7 @@ const HANDLERS = {
       expiresTick: world.tick + Math.max(48, Math.min(1000, Number(args.deadlineTicks) || 288)),
     };
     world.contracts[contract.id] = contract;
+    agent.stats.contractsPosted = (agent.stats.contractsPosted || 0) + 1;
     logEvent(world, {
       type: 'contract_posted', importance: 2, actorId: agent.id, actorName: agent.name,
       text: `${agent.name} posts a contract: ${qty}× ${kind === 'care' ? 'care' : ITEMS[item].label} for ${reward} zori (escrow).`,
@@ -1395,6 +1396,7 @@ const HANDLERS = {
     contract.status = 'taken';
     contract.toId = agent.id;
     contract.takenTick = world.tick;
+    agent.stats.contractsTaken = (agent.stats.contractsTaken || 0) + 1;
     logEvent(world, {
       type: 'contract_taken', importance: 1, actorId: agent.id, actorName: agent.name,
       text: `${agent.name} takes ${world.agents[contract.fromId]?.name ?? 'someone'}'s contract (${contract.reward} zori).`,
@@ -1415,9 +1417,11 @@ const HANDLERS = {
     if (!contract) fail('NO_CONTRACT', 'Contract not found.', 'Check the id.');
     if (contract.status === 'open' && contract.fromId === agent.id) {
       contract.status = 'cancelled';
+      contract.closedTick = world.tick;
       agent.coins += contract.reward;
+      agent.stats.contractsCancelled = (agent.stats.contractsCancelled || 0) + 1;
       logEvent(world, {
-        type: 'contract_expired', importance: 1, actorId: agent.id, actorName: agent.name,
+        type: 'contract_cancelled', importance: 1, actorId: agent.id, actorName: agent.name,
         text: `${agent.name} cancels ${contract.id}; ${contract.reward} zori returned.`,
       });
       return { message: 'Contract cancelled, escrow returned.', data: { refund: contract.reward } };
@@ -1426,8 +1430,9 @@ const HANDLERS = {
       contract.status = 'open';
       contract.toId = null;
       contract.takenTick = null;
+      agent.stats.contractsReleased = (agent.stats.contractsReleased || 0) + 1;
       logEvent(world, {
-        type: 'contract_expired', importance: 1, actorId: agent.id, actorName: agent.name,
+        type: 'contract_released', importance: 1, actorId: agent.id, actorName: agent.name,
         text: `${agent.name} steps back from ${contract.id}; it is open again.`,
       });
       return { message: 'You stepped back; the contract is open again.', data: { contractId: contract.id } };
@@ -1742,9 +1747,12 @@ export function expireContracts(world) {
     if (contract.status !== 'open' && contract.status !== 'taken') continue;
     if (world.tick > contract.expiresTick) {
       contract.status = 'expired';
+      contract.closedTick = world.tick;
       const owner = world.agents[contract.fromId];
       if (owner) owner.coins += contract.reward;
       const taker = contract.toId ? world.agents[contract.toId] : null;
+      if (taker) taker.stats.contractsLapsed = (taker.stats.contractsLapsed || 0) + 1;
+      else if (owner) owner.stats.contractsUnclaimed = (owner.stats.contractsUnclaimed || 0) + 1;
       logEvent(world, {
         type: 'contract_expired', importance: 1,
         ...(taker ? { actorId: taker.id, actorName: taker.name } : {}),
@@ -1782,10 +1790,11 @@ export function expireContracts(world) {
   }
 
   // Keep the archive bounded: the public view shows 100, memory keeps 200.
-  const expired = Object.values(world.contracts || {}).filter((c) => c.status === 'expired');
-  if (expired.length > 200) {
-    expired.sort((a, b) => (a.expiresTick ?? 0) - (b.expiresTick ?? 0));
-    for (const old of expired.slice(0, expired.length - 200)) delete world.contracts[old.id];
+  const terminal = Object.values(world.contracts || {})
+    .filter((c) => c.status === 'expired' || c.status === 'cancelled');
+  if (terminal.length > 200) {
+    terminal.sort((a, b) => (a.closedTick ?? a.expiresTick ?? 0) - (b.closedTick ?? b.expiresTick ?? 0));
+    for (const old of terminal.slice(0, terminal.length - 200)) delete world.contracts[old.id];
   }
 }
 

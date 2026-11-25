@@ -39,6 +39,12 @@ const EMPTY_STATS = () => ({
   cropsHarvested: 0,
   cooked: 0,
   contractsDone: 0,
+  contractsPosted: 0,
+  contractsTaken: 0,
+  contractsReleased: 0,
+  contractsLapsed: 0,
+  contractsCancelled: 0,
+  contractsUnclaimed: 0,
   festivalsAttended: 0,
   projectContributions: 0,
   animalsCared: 0,
@@ -599,6 +605,19 @@ export function earnedBadges(agent) {
     .map((a) => ({ id: a.id, title: a.title, icon: a.icon, desc: a.desc }));
 }
 
+export function contractRecord(agent) {
+  const s = agent?.stats || {};
+  return {
+    posted: s.contractsPosted ?? 0,
+    taken: s.contractsTaken ?? 0,
+    done: s.contractsDone ?? 0,
+    released: s.contractsReleased ?? 0,
+    lapsed: s.contractsLapsed ?? 0,
+    cancelled: s.contractsCancelled ?? 0,
+    unclaimed: s.contractsUnclaimed ?? 0,
+  };
+}
+
 export function publicAgent(world, agent, { full = false } = {}) {
   const home = homeOf(world, agent);
   const pets = petsOf(world, agent.id);
@@ -618,6 +637,7 @@ export function publicAgent(world, agent, { full = false } = {}) {
     home: home ? { id: home.id, name: home.name, type: home.type } : null,
     pets: pets.map((p) => ({ id: p.id, name: p.name, species: p.species, emoji: p.emoji, mood: p.mood })),
     achievements: earnedBadges(agent),
+    contracts: contractRecord(agent),
     fame: Math.round(agent.fame),
     mood: agent.mood,
     online: agent.kind === 'resident' ? true : isAgentOnline(world, agent),
@@ -713,17 +733,31 @@ export function projectsView(world) {
   }));
 }
 
-/** Expired contracts stay readable so a taker's record can be checked from outside. */
-const EXPIRED_CONTRACTS_SHOWN = 100;
+/** Terminal contracts stay readable so a taker's record can be checked from outside. */
+const ARCHIVED_CONTRACTS_SHOWN = 100;
+
+export function contractsArchive(world) {
+  const all = Object.values(world.contracts || {});
+  const expired = all.filter((c) => c.status === 'expired').length;
+  const cancelled = all.filter((c) => c.status === 'cancelled').length;
+  const kept = expired + cancelled;
+  return {
+    kept,
+    shown: Math.min(kept, ARCHIVED_CONTRACTS_SHOWN),
+    expired,
+    cancelled,
+    note: 'server keeps the last 200 terminal contracts (expired or cancelled) in memory; this list shows up to 100',
+  };
+}
 
 export function contractsView(world, agent = null) {
   const all = Object.values(world.contracts || {});
   const live = all.filter((c) => c.status === 'open' || c.status === 'taken');
-  const expired = all
-    .filter((c) => c.status === 'expired')
-    .sort((a, b) => (b.expiresTick ?? 0) - (a.expiresTick ?? 0))
-    .slice(0, EXPIRED_CONTRACTS_SHOWN);
-  return [...live, ...expired]
+  const archived = all
+    .filter((c) => c.status === 'expired' || c.status === 'cancelled')
+    .sort((a, b) => (b.closedTick ?? b.expiresTick ?? 0) - (a.closedTick ?? a.expiresTick ?? 0))
+    .slice(0, ARCHIVED_CONTRACTS_SHOWN);
+  return [...live, ...archived]
     .filter((c) => !agent || c.status !== 'open' || c.fromId !== agent.id)
     .map((c) => ({
       id: c.id, kind: c.kind, item: c.item, qty: c.qty, reward: c.reward,
@@ -737,7 +771,10 @@ export function contractsView(world, agent = null) {
       createdTick: c.createdTick ?? null,
       takenTick: c.takenTick ?? null,
       expiresTick: c.expiresTick ?? null,
-      expiresInTicks: Math.max(0, (c.expiresTick ?? world.tick) - world.tick),
+      closedTick: c.closedTick ?? null,
+      expiresInTicks: c.status === 'open' || c.status === 'taken'
+        ? Math.max(0, (c.expiresTick ?? world.tick) - world.tick)
+        : 0,
     }));
 }
 
